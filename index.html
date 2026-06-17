@@ -107,12 +107,12 @@ body{font-family:'Barlow',sans-serif;background:var(--bg);color:var(--text);min-
 .gresult{font-size:11px;border:1px solid var(--border);border-radius:5px;background:#fff;color:var(--muted);padding:2px 5px;cursor:pointer}
 
 /* KO STAGE */
-.kh{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px}
+.kh{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px}
 .kh h2{font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:700}
 .khint{font-size:13px;color:var(--muted)}
-.my-pick-bar{background:var(--blue-l);border:1px solid #c5d9f5;border-radius:var(--r);padding:8px 14px;font-size:13px;color:var(--blue);font-weight:500;margin-bottom:12px}
-.matches{display:flex;flex-direction:column;gap:8px}
-.mc{background:var(--card);border:1px solid var(--border);border-radius:var(--rl);overflow:hidden}
+.my-pick-bar{background:var(--blue-l);border:1px solid #c5d9f5;border-radius:var(--r);padding:5px 12px;font-size:12px;color:var(--blue);font-weight:500;margin-bottom:8px}
+.matches{display:flex;flex-direction:column;gap:5px}
+.mc{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .mc.haspick{border-color:#c5d9f5}
 .mtr{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .1s}
 .mtr:last-of-type{border-bottom:none}
@@ -134,6 +134,30 @@ body{font-family:'Barlow',sans-serif;background:var(--bg);color:var(--text);min-
 .mfoot{display:flex;align-items:center;gap:8px;padding:6px 14px;background:#fafaf8;border-top:1px solid var(--border)}
 .mfoot label{font-size:10px;color:var(--hint);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
 .mfoot select{font-family:'Barlow',sans-serif;font-size:12px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--text);padding:3px 7px;cursor:pointer}
+
+/* COMPACT KO ROW */
+.mc-row{display:flex;align-items:center;gap:0;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;font-size:13px}
+.mc-row.haspick{border-color:#c5d9f5}
+.mtr-c{display:flex;align-items:center;gap:6px;padding:7px 10px;cursor:pointer;flex:1;min-width:0;transition:background .1s}
+.mtr-c:first-child{justify-content:flex-start}
+.mtr-c:last-child{justify-content:flex-end}
+.mtr-c:hover{background:var(--bg)}
+.mtr-c.mpick{background:var(--blue-l)}
+.mtr-c.mpick .mname-c{color:var(--blue);font-weight:700}
+.mtr-c.mwon{background:var(--green-l)}
+.mtr-c.mwon .mname-c{color:var(--green);font-weight:700}
+.mtr-c.mlost{background:var(--red-l);opacity:.5}
+.mtr-c.mloser{opacity:.35}
+.mtr-c.mused{opacity:.2;pointer-events:none}
+.mflag-c{font-size:15px;flex-shrink:0}
+.mname-c{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mprob-c{font-size:11px;color:var(--hint);flex-shrink:0;min-width:32px}
+.mtr-c:last-child .mprob-c{text-align:right}
+.mbadge-c{font-size:11px;font-weight:700;flex-shrink:0;width:14px;text-align:center}
+.mbadge-c.mb-p{color:var(--blue)}
+.mbadge-c.mb-w{color:var(--green)}
+.mbadge-c.mb-l{color:var(--red)}
+.mresult-c{font-family:'Barlow',sans-serif;font-size:11px;border:1px solid var(--border);border-left:1px solid var(--border);border-right:1px solid var(--border);border-radius:0;background:#fafaf8;color:var(--muted);padding:7px 6px;cursor:pointer;flex-shrink:0;max-width:110px}
 
 /* CHAMP */
 .champ-box{background:var(--gold-l);border:2px solid var(--gold);border-radius:var(--rl);padding:32px;text-align:center;max-width:420px;margin:0 auto 20px}
@@ -837,7 +861,7 @@ function renderKOStage(ri) {
       '<div class="champ-name">'+ct.f+' '+esc(ct.n)+'</div>' +
       '<div class="champ-sub">'+(m.result?'World Champion':'Your pick to win it all')+'</div></div>';
     h += '<div class="kh"><h2>The Final</h2></div>';
-    h += '<div style="max-width:460px;margin:0 auto"><div class="mc'+(pick?' haspick':'')+'">'+matchRow(m,0,ri,hP,aP,used,pick)+'</div></div>';
+    h += '<div style="max-width:520px;margin:0 auto">'+matchRow(m,0,ri,hP,aP,used,pick)+'</div>';
     return h;
   }
 
@@ -846,7 +870,7 @@ function renderKOStage(ri) {
   h += '<div class="matches">';
   rd.matches.forEach(function(m, mi) {
     var hP=pick===m.h.n, aP=pick===m.a.n;
-    h += '<div class="mc'+(hP||aP?' haspick':'')+'">'+matchRow(m,mi,ri,hP,aP,used,pick)+'</div>';
+    h += matchRow(m,mi,ri,hP,aP,used,pick);
   });
   h += '</div>';
   return h;
@@ -855,7 +879,7 @@ function renderKOStage(ri) {
 function matchRow(m, mi, ri, hP, aP, used, pick) {
   var hUsed = used.has(m.h.n) && !hP;
   var aUsed = used.has(m.a.n) && !aP;
-  var hCls='mtr', aCls='mtr';
+  var hCls='mtr-c', aCls='mtr-c';
   if (m.result) {
     if (m.result===m.h.n) { hCls+=(hP?' mwon':' mloser'); aCls+=(aP?' mlost':' mloser'); }
     else { aCls+=(aP?' mwon':' mloser'); hCls+=(hP?' mlost':' mloser'); }
@@ -866,16 +890,20 @@ function matchRow(m, mi, ri, hP, aP, used, pick) {
   if (hUsed) hCls+=' mused';
   if (aUsed) aCls+=' mused';
   var hBadge='', aBadge='';
-  if (hP) hBadge='<span class="mbadge '+(m.result?(m.result===m.h.n?'mb-w':'mb-l'):'mb-p')+'">'+(m.result?(m.result===m.h.n?'✓ Correct':'✗ Wrong'):'My Pick')+'</span>';
-  if (aP) aBadge='<span class="mbadge '+(m.result?(m.result===m.a.n?'mb-w':'mb-l'):'mb-p')+'">'+(m.result?(m.result===m.a.n?'✓ Correct':'✗ Wrong'):'My Pick')+'</span>';
+  if (hP) hBadge='<span class="mbadge-c '+(m.result?(m.result===m.h.n?'mb-w':'mb-l'):'mb-p')+'">'+(m.result?(m.result===m.h.n?'✓':'✗'):'★')+'</span>';
+  if (aP) aBadge='<span class="mbadge-c '+(m.result?(m.result===m.a.n?'mb-w':'mb-l'):'mb-p')+'">'+(m.result?(m.result===m.a.n?'✓':'✗'):'★')+'</span>';
   var opts='<option value="">Pending</option>' +
     '<option value="'+esc2(m.h.n)+'"'+(m.result===m.h.n?' selected':'')+'>'+esc(m.h.f)+' '+esc(m.h.n)+'</option>' +
     '<option value="'+esc2(m.a.n)+'"'+(m.result===m.a.n?' selected':'')+'>'+esc(m.a.f)+' '+esc(m.a.n)+'</option>';
-  return '<div class="'+hCls+'" onclick="'+(hUsed?'':'toggleKOPick('+ri+',\''+esc2(m.h.n)+'\')')+'">' +
-    '<span class="mflag">'+m.h.f+'</span><span class="mname">'+esc(m.h.n)+'</span><span class="mprob">'+m.hp+'%</span>'+hBadge+'</div>' +
+  return '<div class="mc-row">' +
+    '<div class="'+hCls+'" onclick="'+(hUsed?'':'toggleKOPick('+ri+',\''+esc2(m.h.n)+'\')')+'">' +
+      hBadge+'<span class="mflag-c">'+m.h.f+'</span><span class="mname-c">'+esc(m.h.n)+'</span><span class="mprob-c">'+m.hp+'%</span>' +
+    '</div>' +
+    '<select class="mresult-c" onchange="setMatchResult('+ri+','+mi+',this.value)">'+opts+'</select>' +
     '<div class="'+aCls+'" onclick="'+(aUsed?'':'toggleKOPick('+ri+',\''+esc2(m.a.n)+'\')')+'">' +
-    '<span class="mflag">'+m.a.f+'</span><span class="mname">'+esc(m.a.n)+'</span><span class="mprob">'+m.ap+'%</span>'+aBadge+'</div>' +
-    '<div class="mfoot"><label>Result:</label><select onchange="setMatchResult('+ri+','+mi+',this.value)">'+opts+'</select></div>';
+      '<span class="mprob-c">'+m.ap+'%</span><span class="mname-c">'+esc(m.a.n)+'</span><span class="mflag-c">'+m.a.f+'</span>'+aBadge +
+    '</div>' +
+  '</div>';
 }
 
 function renderSummary() {
