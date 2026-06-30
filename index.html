@@ -776,9 +776,13 @@ function renderSummary() {
         var m=rd&&rd.matches.find(function(m){return m.h.n===pk||m.a.n===pk;});
         var flag=m?(m.h.n===pk?m.h.f:m.a.f):getTeamFlag(pk);
         var q = getQuadrant(pk);
-        h+='<span class="ptag '+st+'" onclick="selectEntry('+ei+');go(\''+KO_NAMES[ri]+'\')" title="Click to edit">'
+        var qColor = q ? QUAD_COLORS[q] : '#999';
+        var qBg = q ? qColor+'1A' : 'var(--bg)'; // ~10% opacity tint
+        var strikethrough = st==='wrng' ? 'text-decoration:line-through;opacity:.6;' : '';
+        h+='<span class="ptag" style="background:'+qBg+';border-color:'+qColor+';color:'+qColor+';'+strikethrough+'" onclick="selectEntry('+ei+');go(\''+KO_NAMES[ri]+'\')" title="Click to edit">'
           +flag+' '+esc(pk)
-          +(q?'<span style="font-size:9px;font-weight:700;opacity:.55;margin-left:3px;background:rgba(0,0,0,.1);padding:1px 4px;border-radius:3px">'+q+'</span>':'')
+          +(q?'<span style="font-size:9px;font-weight:700;margin-left:3px;background:'+qColor+';color:#fff;padding:1px 4px;border-radius:3px">'+q+'</span>':'')
+          +(st==='corr'?'<span style="margin-left:3px;font-weight:700">✓</span>':'')
           +'</span>';
       });
       h += '</div></td>';
