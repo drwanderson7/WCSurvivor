@@ -368,7 +368,28 @@ function loadData() {
     if (Array.isArray(d.entries)) entries = d.entries;
     if (d.selEntry !== undefined) selEntry = d.selEntry;
     if (typeof d.stage === 'string') stage = d.stage;
-    if (Array.isArray(d.koRounds)) koRounds = d.koRounds;
+    // Merge saved koRounds onto fresh KO_DEF rather than overwriting:
+    // - Always take hp/ap/city/date from the current code (KO_DEF), since those are
+    //   maintained by app updates and shouldn't be stuck on stale saved values.
+    // - Only carry over a saved match.result if the current code-defined match has
+    //   no hardcoded result (i.e. don't let an old saved "Pending" erase a result
+    //   that was just hardcoded into KO_DEF, but DO preserve manually-set results
+    //   the user entered for matches the code doesn't already know the outcome of).
+    if (Array.isArray(d.koRounds)) {
+      koRounds.forEach(function(rd, ri) {
+        var savedRd = d.koRounds[ri];
+        if (!savedRd || !Array.isArray(savedRd.matches)) return;
+        rd.matches.forEach(function(m, mi) {
+          var savedM = savedRd.matches[mi];
+          if (!savedM) return;
+          // If the fresh code already has a hardcoded result, keep it (don't let stale "Pending" win).
+          // Otherwise, fall back to whatever the user had saved.
+          if (!m.result && savedM.result) {
+            m.result = savedM.result;
+          }
+        });
+      });
+    }
   } catch(e) {
     try { localStorage.removeItem('wc26_r32_v1'); } catch(e2){}
   }
@@ -722,13 +743,15 @@ function matchRow(m, mi, ri, hP, aP, used, pick) {
   var opts='<option value="">Pending</option>' +
     '<option value="'+esc2(m.h.n)+'"'+(m.result===m.h.n?' selected':'')+'>'+esc(m.h.f)+' '+esc(m.h.n)+'</option>' +
     '<option value="'+esc2(m.a.n)+'"'+(m.result===m.a.n?' selected':'')+'>'+esc(m.a.f)+' '+esc(m.a.n)+'</option>';
+  var hpDisplay = m.result ? (m.result===m.h.n ? '100' : '0') : m.hp;
+  var apDisplay = m.result ? (m.result===m.a.n ? '100' : '0') : m.ap;
   return '<div class="mc-row">' +
     '<div class="'+hCls+'" onclick="'+(hUsed?'':'toggleKOPick('+ri+',\''+esc2(m.h.n)+'\')')+'">' +
-      hBadge+'<span class="mflag-c">'+m.h.f+'</span><span class="mname-c">'+esc(m.h.n)+'</span><span class="mprob-c">'+m.hp+'%</span>' +
+      hBadge+'<span class="mflag-c">'+m.h.f+'</span><span class="mname-c">'+esc(m.h.n)+'</span><span class="mprob-c">'+hpDisplay+'%</span>' +
     '</div>' +
     '<select class="mresult-c" onchange="setMatchResult('+ri+','+mi+',this.value)">'+opts+'</select>' +
     '<div class="'+aCls+'" onclick="'+(aUsed?'':'toggleKOPick('+ri+',\''+esc2(m.a.n)+'\')')+'">' +
-      '<span class="mprob-c">'+m.ap+'%</span><span class="mname-c">'+esc(m.a.n)+'</span><span class="mflag-c">'+m.a.f+'</span>'+aBadge +
+      '<span class="mprob-c">'+apDisplay+'%</span><span class="mname-c">'+esc(m.a.n)+'</span><span class="mflag-c">'+m.a.f+'</span>'+aBadge +
     '</div>' +
   '</div>';
 }
