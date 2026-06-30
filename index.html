@@ -275,17 +275,17 @@ const TEAM_INFO = {
 const KO_DEF = [
   {name:'Round of 32',matches:[
     // Q1 — France's quadrant
-    {h:{f:'🇩🇪',n:'Germany'},a:{f:'🇵🇾',n:'Paraguay'},hp:78,ap:22,result:null,city:'Boston',date:'Jun 29'},
+    {h:{f:'🇩🇪',n:'Germany'},a:{f:'🇵🇾',n:'Paraguay'},hp:22,ap:78,result:'Paraguay',city:'Boston',date:'Jun 29'},
     {h:{f:'🇫🇷',n:'France'},a:{f:'🇸🇪',n:'Sweden'},hp:86,ap:14,result:null,city:'New York',date:'Jun 30'},
-    {h:{f:'🇿🇦',n:'South Africa'},a:{f:'🇨🇦',n:'Canada'},hp:0,ap:100,result:null,city:'Los Angeles',date:'Jun 28'},
-    {h:{f:'🇳🇱',n:'Netherlands'},a:{f:'🇲🇦',n:'Morocco'},hp:36,ap:64,result:null,city:'Monterrey',date:'Jun 29'},
+    {h:{f:'🇿🇦',n:'South Africa'},a:{f:'🇨🇦',n:'Canada'},hp:0,ap:100,result:'Canada',city:'Los Angeles',date:'Jun 28'},
+    {h:{f:'🇳🇱',n:'Netherlands'},a:{f:'🇲🇦',n:'Morocco'},hp:0,ap:100,result:'Morocco',city:'Monterrey',date:'Jun 29'},
     // Q2 — USA's quadrant
     {h:{f:'🇵🇹',n:'Portugal'},a:{f:'🇭🇷',n:'Croatia'},hp:72,ap:28,result:null,city:'Toronto',date:'Jul 2'},
     {h:{f:'🇪🇸',n:'Spain'},a:{f:'🇦🇹',n:'Austria'},hp:84,ap:16,result:null,city:'Los Angeles',date:'Jul 2'},
     {h:{f:'🇺🇸',n:'United States'},a:{f:'🇧🇦',n:'Bosnia'},hp:74,ap:26,result:null,city:'San Francisco',date:'Jul 1'},
     {h:{f:'🇧🇪',n:'Belgium'},a:{f:'🇸🇳',n:'Senegal'},hp:59,ap:41,result:null,city:'Seattle',date:'Jul 1'},
     // Q3 — Mexico's quadrant
-    {h:{f:'🇧🇷',n:'Brazil'},a:{f:'🇯🇵',n:'Japan'},hp:72,ap:28,result:null,city:'Houston',date:'Jun 29'},
+    {h:{f:'🇧🇷',n:'Brazil'},a:{f:'🇯🇵',n:'Japan'},hp:100,ap:0,result:'Brazil',city:'Houston',date:'Jun 29'},
     {h:{f:'🇨🇮',n:'Ivory Coast'},a:{f:'🇳🇴',n:'Norway'},hp:38,ap:62,result:null,city:'Dallas',date:'Jun 30'},
     {h:{f:'🇲🇽',n:'Mexico'},a:{f:'🇪🇨',n:'Ecuador'},hp:61,ap:39,result:null,city:'Mexico City',date:'Jun 30'},
     {h:{f:'🏴󠁧󠁢󠁥󠁮󠁧󠁿',n:'England'},a:{f:'🇨🇩',n:'D.R. Congo'},hp:85,ap:15,result:null,city:'Atlanta',date:'Jul 1'},
@@ -1074,8 +1074,26 @@ function renderProbs() {
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function esc2(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 
+// Re-validate all entries against any match results baked into the static KO_DEF
+// (e.g. matches already decided before the app loaded). Marks entries eliminated
+// if they picked a team that lost a decided match.
+function revalidateEntries() {
+  entries.forEach(function(e) {
+    koRounds.forEach(function(rd, ri) {
+      rd.matches.forEach(function(m) {
+        if (!m.result) return;
+        var picksArr = ri === 0 ? (e.koPicks[0]||[]) : ((e.koPicks||[])[ri] ? [(e.koPicks||[])[ri]] : []);
+        picksArr.forEach(function(pick) {
+          if ((m.h.n===pick||m.a.n===pick) && pick!==m.result) e.alive = false;
+        });
+      });
+    });
+  });
+}
+
 // ── INIT ──
 loadData();
+revalidateEntries();
 try { render(); } catch(e) {
   console.error('Render error:', e);
   entries = []; selEntry = null; stage = 'overview';
