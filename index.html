@@ -833,6 +833,95 @@ function renderSummary() {
     h += '</div>';
   }
 
+  // ── QUADRANT COMBINATIONS MATRIX ──
+  if (total > 0) {
+    var QORDER = ['Q1','Q2','Q3','Q4'];
+    var PAIRS = [];
+    for (var pi=0; pi<QORDER.length; pi++) {
+      for (var pj=pi+1; pj<QORDER.length; pj++) {
+        PAIRS.push([QORDER[pi], QORDER[pj]]);
+      }
+    }
+
+    function entryQuadSet(e) {
+      var s = new Set();
+      (e.koPicks||[]).forEach(function(pick, ri) {
+        var names = ri===0 ? (pick||[]) : (pick ? [pick] : []);
+        names.forEach(function(name) {
+          var q = getQuadrant(name);
+          if (q) s.add(q);
+        });
+      });
+      return s;
+    }
+
+    h += '<div style="margin-top:28px">';
+    h += '<h3 style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:700;margin-bottom:4px">Quadrant Combinations</h3>';
+    h += '<p style="font-size:12px;color:var(--muted);margin-bottom:14px">Which quadrants each entry has picks in, and how they pair up. Click a row to jump to that entry.</p>';
+
+    // Per-entry quadrant matrix
+    h += '<div class="sum-wrap"><table class="sum-tbl"><thead><tr><th>Pool</th>';
+    QORDER.forEach(function(q) {
+      h += '<th style="text-align:center;color:'+QUAD_COLORS[q]+'">'+q+'</th>';
+    });
+    PAIRS.forEach(function(p) {
+      h += '<th style="text-align:center">'+p[0]+'+'+p[1]+'</th>';
+    });
+    h += '</tr></thead><tbody>';
+
+    entries.forEach(function(e, ei) {
+      var qSet = entryQuadSet(e);
+      h += '<tr class="'+(e.alive?'r-alive':'r-elim')+'" style="cursor:pointer" onclick="selectEntry('+ei+');go(\'Round of 32\')">';
+      h += '<td><div class="pname">'+esc(e.name)+'</div></td>';
+      QORDER.forEach(function(q) {
+        var has = qSet.has(q);
+        h += '<td style="text-align:center">';
+        if (has) {
+          h += '<span style="display:inline-block;width:20px;height:20px;border-radius:5px;background:'+QUAD_COLORS[q]+';color:#fff;font-size:11px;font-weight:700;line-height:20px">✓</span>';
+        } else {
+          h += '<span style="color:var(--border);font-size:13px">—</span>';
+        }
+        h += '</td>';
+      });
+      PAIRS.forEach(function(p) {
+        var hasBoth = qSet.has(p[0]) && qSet.has(p[1]);
+        h += '<td style="text-align:center">';
+        if (hasBoth) {
+          h += '<span style="display:inline-flex;align-items:center;gap:2px;background:linear-gradient(90deg,'+QUAD_COLORS[p[0]]+' 0%,'+QUAD_COLORS[p[0]]+' 50%,'+QUAD_COLORS[p[1]]+' 50%,'+QUAD_COLORS[p[1]]+' 100%);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px">✓</span>';
+        } else {
+          h += '<span style="color:var(--border);font-size:13px">—</span>';
+        }
+        h += '</td>';
+      });
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+
+    // Quick summary: which pair combos are most common across the pool
+    var pairCounts = {};
+    PAIRS.forEach(function(p){ pairCounts[p[0]+'+'+p[1]] = 0; });
+    entries.forEach(function(e) {
+      var qSet = entryQuadSet(e);
+      PAIRS.forEach(function(p) {
+        if (qSet.has(p[0]) && qSet.has(p[1])) pairCounts[p[0]+'+'+p[1]]++;
+      });
+    });
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">';
+    PAIRS.forEach(function(p) {
+      var key = p[0]+'+'+p[1];
+      var cnt = pairCounts[key];
+      if (cnt === 0) return;
+      h += '<div style="display:flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:5px 12px">' +
+        '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:linear-gradient(90deg,'+QUAD_COLORS[p[0]]+' 0 50%,'+QUAD_COLORS[p[1]]+' 50% 100%)"></span>' +
+        '<span style="font-size:12px;font-weight:600">'+key+'</span>' +
+        '<span style="font-size:11px;color:var(--muted)">in '+cnt+' entr'+(cnt===1?'y':'ies')+'</span>' +
+        '</div>';
+    });
+    h += '</div>';
+
+    h += '</div>'; // quadrant combos section
+  }
+
   h += '</div>'; // main-inner
   return h;
 }
