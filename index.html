@@ -324,6 +324,35 @@ const KO_DEF = [
   ]},
 ];
 
+// ── BRACKET FEED ──
+// Maps [ri, mi] -> { nextRi, nextMi, slot:'h'|'a' }
+// Winner of match [ri][mi] becomes the home or away team in [nextRi][nextMi]
+const BRACKET_FEED = {
+  '0-0':  {ri:1, mi:0, slot:'h'},  // R32 m0 winner -> R16 m0 home
+  '0-1':  {ri:1, mi:0, slot:'a'},  // R32 m1 winner -> R16 m0 away
+  '0-2':  {ri:1, mi:1, slot:'h'},  // R32 m2 winner -> R16 m1 home
+  '0-3':  {ri:1, mi:1, slot:'a'},  // R32 m3 winner -> R16 m1 away
+  '0-4':  {ri:1, mi:2, slot:'h'},  // R32 m4 winner -> R16 m2 home
+  '0-5':  {ri:1, mi:2, slot:'a'},  // R32 m5 winner -> R16 m2 away
+  '0-6':  {ri:1, mi:3, slot:'h'},  // R32 m6 winner -> R16 m3 home
+  '0-7':  {ri:1, mi:3, slot:'a'},  // R32 m7 winner -> R16 m3 away
+  '0-8':  {ri:1, mi:4, slot:'h'},  // R32 m8 winner -> R16 m4 home
+  '0-9':  {ri:1, mi:4, slot:'a'},  // R32 m9 winner -> R16 m4 away
+  '0-10': {ri:1, mi:5, slot:'h'},  // R32 m10 winner -> R16 m5 home
+  '0-11': {ri:1, mi:5, slot:'a'},  // R32 m11 winner -> R16 m5 away
+  '0-12': {ri:1, mi:6, slot:'h'},  // R32 m12 winner -> R16 m6 home
+  '0-13': {ri:1, mi:6, slot:'a'},  // R32 m13 winner -> R16 m6 away
+  '0-14': {ri:1, mi:7, slot:'h'},  // R32 m14 winner -> R16 m7 home
+  '0-15': {ri:1, mi:7, slot:'a'},  // R32 m15 winner -> R16 m7 away
+  '1-0':  {ri:2, mi:0, slot:'h'},  '1-1':  {ri:2, mi:0, slot:'a'},
+  '1-2':  {ri:2, mi:1, slot:'h'},  '1-3':  {ri:2, mi:1, slot:'a'},
+  '1-4':  {ri:2, mi:2, slot:'h'},  '1-5':  {ri:2, mi:2, slot:'a'},
+  '1-6':  {ri:2, mi:3, slot:'h'},  '1-7':  {ri:2, mi:3, slot:'a'},
+  '2-0':  {ri:3, mi:0, slot:'h'},  '2-1':  {ri:3, mi:0, slot:'a'},
+  '2-2':  {ri:3, mi:1, slot:'h'},  '2-3':  {ri:3, mi:1, slot:'a'},
+  '3-0':  {ri:4, mi:0, slot:'h'},  '3-1':  {ri:4, mi:0, slot:'a'},
+};
+
 // ── QUADRANT MAP ──
 const QUADRANTS = {
   Q1: ['Germany','Paraguay','France','Sweden','South Africa','Canada','Netherlands','Morocco'],
@@ -507,10 +536,47 @@ function toggleKOPick(ri, teamName) {
 }
 
 function setMatchResult(ri, mi, winner) {
-  koRounds[ri].matches[mi].result = winner || null;
+  var m = koRounds[ri].matches[mi];
+  m.result = winner || null;
+
+  // Propagate winner into the next round's match slot
   if (winner) {
+    var feedKey = ri + '-' + mi;
+    var feed = BRACKET_FEED[feedKey];
+    if (feed) {
+      var nextM = koRounds[feed.ri].matches[feed.mi];
+      var winnerTeam = winner === m.h.n ? m.h : m.a;
+      // Only update if the slot isn't already set to a different (still-valid) team
+      if (feed.slot === 'h') {
+        nextM.h = { f: winnerTeam.f, n: winnerTeam.n };
+      } else {
+        nextM.a = { f: winnerTeam.f, n: winnerTeam.n };
+      }
+      // Update probabilities for the next match using relative TEAM_INFO strength
+      var hInfo = TEAM_INFO[nextM.h.n];
+      var aInfo = TEAM_INFO[nextM.a.n];
+      if (hInfo && aInfo) {
+        var hStr = hInfo.qf || 1;
+        var aStr = aInfo.qf || 1;
+        var total = hStr + aStr;
+        nextM.hp = Math.round(hStr / total * 100);
+        nextM.ap = 100 - nextM.hp;
+      }
+      // If the winner slot previously had a different team's result, clear the downstream result
+      if (nextM.result) {
+        nextM.result = null;
+        // Also clear further downstream recursively
+        var nextFeedKey = feed.ri + '-' + feed.mi;
+        var nextFeed = BRACKET_FEED[nextFeedKey];
+        if (nextFeed) {
+          var nextNextM = koRounds[nextFeed.ri].matches[nextFeed.mi];
+          nextNextM.result = null;
+        }
+      }
+    }
+
+    // Mark eliminated entries
     entries.forEach(function(e) {
-      var m = koRounds[ri].matches[mi];
       if (ri === 0) {
         var picksArr = e.koPicks[0] || [];
         picksArr.forEach(function(pick) {
@@ -521,7 +587,21 @@ function setMatchResult(ri, mi, winner) {
         if (pick && (m.h.n===pick||m.a.n===pick) && pick!==winner) e.alive = false;
       }
     });
+  } else {
+    // Result cleared — reset the downstream slot back to a TBD placeholder
+    var feedKey = ri + '-' + mi;
+    var feed = BRACKET_FEED[feedKey];
+    if (feed) {
+      var nextM = koRounds[feed.ri].matches[feed.mi];
+      if (feed.slot === 'h') {
+        nextM.h = { f: '❓', n: 'TBD' };
+      } else {
+        nextM.a = { f: '❓', n: 'TBD' };
+      }
+      nextM.result = null;
+    }
   }
+
   saveData(); render();
 }
 
@@ -1100,6 +1180,30 @@ function esc2(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 // Re-validate all entries against any match results baked into the static KO_DEF
 // (e.g. matches already decided before the app loaded). Marks entries eliminated
 // if they picked a team that lost a decided match.
+function propagateBracket() {
+  // Walk every round in order, pushing winners into next-round slots
+  koRounds.forEach(function(rd, ri) {
+    rd.matches.forEach(function(m, mi) {
+      if (!m.result) return;
+      var feedKey = ri + '-' + mi;
+      var feed = BRACKET_FEED[feedKey];
+      if (!feed) return;
+      var nextM = koRounds[feed.ri].matches[feed.mi];
+      var winnerTeam = m.result === m.h.n ? m.h : m.a;
+      if (feed.slot === 'h') nextM.h = { f: winnerTeam.f, n: winnerTeam.n };
+      else nextM.a = { f: winnerTeam.f, n: winnerTeam.n };
+      // Update probabilities
+      var hInfo = TEAM_INFO[nextM.h.n];
+      var aInfo = TEAM_INFO[nextM.a.n];
+      if (hInfo && aInfo) {
+        var total = (hInfo.qf||1) + (aInfo.qf||1);
+        nextM.hp = Math.round((hInfo.qf||1) / total * 100);
+        nextM.ap = 100 - nextM.hp;
+      }
+    });
+  });
+}
+
 function revalidateEntries() {
   entries.forEach(function(e) {
     koRounds.forEach(function(rd, ri) {
@@ -1116,6 +1220,7 @@ function revalidateEntries() {
 
 // ── INIT ──
 loadData();
+propagateBracket();
 revalidateEntries();
 try { render(); } catch(e) {
   console.error('Render error:', e);
