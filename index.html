@@ -325,6 +325,49 @@ const KO_DEF = [
   ]},
 ];
 
+
+// ── HEAD-TO-HEAD CONDITIONAL WIN ODDS ──
+// Real conditional win probabilities from Silver Bulletin ("cond win %" if the match occurs).
+// Key: 'TeamA|TeamB' => TeamA win %. Only one direction stored; code checks both orders.
+const MATCHUP_ODDS = {
+  // Quarterfinals
+  'France|Morocco': 80,
+  'Spain|Belgium': 79,
+  'England|Norway': 63,
+  'Argentina|Switzerland': 78,
+  // Semifinals (most-likely meetings)
+  'France|Spain': 57,       // SB showed France 64 / Spain 49 -> midpoint ~57
+  'France|Belgium': 76,
+  'France|Morocco_SF': 999, // placeholder ignore
+  'Argentina|England': 56,
+  'Argentina|Norway': 68,
+  'Argentina|Switzerland_SF': 999,
+  'England|Switzerland': 71,
+  'England|Norway_SF': 999,
+  // Final (most-likely meetings)
+  'France|Argentina': 50,
+  'France|England': 56,
+  'Argentina|Spain': 51,
+  'Argentina|England': 56,
+  'Spain|Norway': 65,
+};
+function getMatchupWinPct(teamA, teamB) {
+  // Returns teamA's win % vs teamB using real odds if available, else TEAM_INFO champ-ratio.
+  if (MATCHUP_ODDS[teamA+'|'+teamB] !== undefined && MATCHUP_ODDS[teamA+'|'+teamB] < 200) {
+    return MATCHUP_ODDS[teamA+'|'+teamB];
+  }
+  if (MATCHUP_ODDS[teamB+'|'+teamA] !== undefined && MATCHUP_ODDS[teamB+'|'+teamA] < 200) {
+    return 100 - MATCHUP_ODDS[teamB+'|'+teamA];
+  }
+  // Fallback: ratio of championship odds (strength proxy)
+  var a = TEAM_INFO[teamA], b = TEAM_INFO[teamB];
+  if (a && b) {
+    var as = a.ch || 1, bs = b.ch || 1;
+    return Math.round(as / (as + bs) * 100);
+  }
+  return 50;
+}
+
 // ── BRACKET FEED ──
 // Maps [ri, mi] -> { nextRi, nextMi, slot:'h'|'a' }
 // Winner of match [ri][mi] becomes the home or away team in [nextRi][nextMi]
@@ -555,14 +598,9 @@ function setMatchResult(ri, mi, winner) {
       } else {
         nextM.a = { f: winnerTeam.f, n: winnerTeam.n };
       }
-      // Update probabilities for the next match using relative TEAM_INFO strength
-      var hInfo = TEAM_INFO[nextM.h.n];
-      var aInfo = TEAM_INFO[nextM.a.n];
-      if (hInfo && aInfo) {
-        var hStr = hInfo.qf || 1;
-        var aStr = aInfo.qf || 1;
-        var total = hStr + aStr;
-        nextM.hp = Math.round(hStr / total * 100);
+      // Update probabilities for the next match using real head-to-head odds
+      if (nextM.h.n !== 'TBD' && nextM.a.n !== 'TBD') {
+        nextM.hp = getMatchupWinPct(nextM.h.n, nextM.a.n);
         nextM.ap = 100 - nextM.hp;
       }
       // If the winner slot previously had a different team's result, clear the downstream result
@@ -1350,12 +1388,9 @@ function propagateBracket() {
       var winnerTeam = m.result === m.h.n ? m.h : m.a;
       if (feed.slot === 'h') nextM.h = { f: winnerTeam.f, n: winnerTeam.n };
       else nextM.a = { f: winnerTeam.f, n: winnerTeam.n };
-      // Update probabilities
-      var hInfo = TEAM_INFO[nextM.h.n];
-      var aInfo = TEAM_INFO[nextM.a.n];
-      if (hInfo && aInfo) {
-        var total = (hInfo.qf||1) + (aInfo.qf||1);
-        nextM.hp = Math.round((hInfo.qf||1) / total * 100);
+      // Update probabilities using real head-to-head odds
+      if (nextM.h.n !== 'TBD' && nextM.a.n !== 'TBD') {
+        nextM.hp = getMatchupWinPct(nextM.h.n, nextM.a.n);
         nextM.ap = 100 - nextM.hp;
       }
     });
