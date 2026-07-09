@@ -432,6 +432,24 @@ function getTeamForwardPath(teamName) {
 // entry sees on their own future-round pages, e.g. showing "Spain" in the Final slot
 // once that entry has picked Spain to win the Semifinal, even though the real-world
 // Semifinal hasn't been played and the official Final match is still TBD for everyone else.
+// Given an unresolved [ri, mi, slot], recursively walks back through the bracket
+// to enumerate every team that could still possibly end up there. E.g. for the
+// Final's still-undecided side, this returns all 4 teams from the other half of the
+// bracket (Norway, England, Argentina, Switzerland), since any of them could win
+// their way there -- not just whichever one an entry happens to have already picked.
+function getPossibleTeamsForSlot(ri, mi, slot) {
+  var m = koRounds[ri].matches[mi];
+  var direct = slot === 'h' ? m.h : m.a;
+  if (direct.n !== 'TBD') return [direct]; // already resolved -- only one possible team
+
+  var source = INVERSE_FEED[ri+'-'+mi+'-'+slot];
+  if (!source) return [direct];
+
+  var fromH = getPossibleTeamsForSlot(source.ri, source.mi, 'h');
+  var fromA = getPossibleTeamsForSlot(source.ri, source.mi, 'a');
+  return fromH.concat(fromA);
+}
+
 function projectTeamForEntry(ri, mi, slot, entry) {
   var m = koRounds[ri].matches[mi];
   var direct = slot === 'h' ? m.h : m.a;
@@ -934,38 +952,88 @@ function renderKOStage(ri) {
 
   if (ri===4) {
     var m = getProjectedMatch(ri, 0, e);
-    var hP=pick===m.h.n, aP=pick===m.a.n;
     var champ = m.result || pick;
-    var ct = champ ? (m.h.n===champ?m.h:m.a) : null;
+    var ct = champ ? (m.h.n===champ?m.h:(m.a.n===champ?m.a:null)) : null;
     var h = '';
     if (ct) h += '<div class="champ-box"><div class="champ-icon">🏆</div>' +
       '<div class="champ-name">'+ct.f+' '+esc(ct.n)+'</div>' +
       '<div class="champ-sub">'+(m.result?'World Champion':'Your pick to win it all')+'</div></div>';
     h += '<div class="kh"><h2>The Final</h2></div>';
-    if (m.projected) {
-      h += '<div style="max-width:520px;margin:0 auto 10px;background:var(--gold-l);border:1px solid #f0d595;border-radius:var(--r);padding:6px 12px;font-size:11px;color:var(--gold);font-weight:600">🔮 Projected matchup — based on your own picks advancing, not yet officially decided</div>';
-    }
-    h += '<div style="max-width:520px;margin:0 auto">' + otherEntriesPanel(ri, pick ? [pick] : []) + '</div>';
-    h += '<div style="max-width:520px;margin:0 auto">'+matchRow(m,0,ri,hP,aP,used,pick)+'</div>';
+    h += '<div style="max-width:640px;margin:0 auto 8px;background:var(--blue-l);border:1px solid #b5cff5;border-radius:var(--r);padding:6px 12px;font-size:11px;color:var(--blue);font-weight:500">Not sure who\'s reaching the Final yet? Click "choose:" on either side to pick who you think will get there — you can lock in your Final winner now, before the Semifinals are even played.</div>';
+    h += '<div style="max-width:640px;margin:0 auto">' + otherEntriesPanel(ri, pick ? [pick] : []) + '</div>';
+    h += '<div style="max-width:640px;margin:0 auto">'+renderFutureMatchRow(ri,0,e,pick,used)+'</div>';
     return h;
   }
 
   var h = '<div class="kh"><h2>'+rd.name+'</h2><span class="khint">Click a team to pick · each team usable once</span></div>';
   h += otherEntriesPanel(ri, pick ? [pick] : []);
   if (pick) h += '<div class="my-pick-bar">✓ Your pick this round: <strong>'+esc(pick)+'</strong> &nbsp;·&nbsp; <span style="color:var(--muted);font-weight:400">Click again to deselect</span></div>';
-  var anyProjected = false;
   h += '<div class="matches">';
-  rd.matches.forEach(function(m0, mi) {
-    var m = getProjectedMatch(ri, mi, e);
-    if (m.projected) anyProjected = true;
-    var hP=pick===m.h.n, aP=pick===m.a.n;
-    h += matchRow(m,mi,ri,hP,aP,used,pick);
-  });
-  h += '</div>';
-  if (anyProjected) {
-    h += '<div style="margin-top:10px;font-size:11px;color:var(--gold);display:flex;align-items:center;gap:5px">🔮 Some matchups above are projected from your own picks advancing further — not yet officially decided in the real tournament</div>';
+  if (ri === 3) {
+    rd.matches.forEach(function(m0, mi) {
+      h += renderFutureMatchRow(ri, mi, e, pick, used);
+    });
+  } else {
+    rd.matches.forEach(function(m, mi) {
+      var hP=pick===m.h.n, aP=pick===m.a.n;
+      h += matchRow(m,mi,ri,hP,aP,used,pick);
+    });
   }
+  h += '</div>';
   return h;
+}
+
+// Renders a SF/Final match row that gracefully handles unresolved sides by showing
+// every team that could possibly land there as clickable options, instead of a dead
+// "TBD" the user can't interact with. This is what lets someone pick, say, "Argentina"
+// as their assumed Final opponent before the real Semifinal has even been played.
+function renderFutureMatchRow(ri, mi, entry, pick, used) {
+  var proj = getProjectedMatch(ri, mi, entry);
+  var resolvedH = proj.h.n !== 'TBD';
+  var resolvedA = proj.a.n !== 'TBD';
+
+  function renderSide(resolved, team, slot, align) {
+    if (resolved) {
+      var isPicked = pick === team.n;
+      var isUsedElsewhere = used.has(team.n) && !isPicked;
+      var cls = 'mtr-c' + (isUsedElsewhere ? ' mused' : '') + (isPicked && !proj.result ? ' mpick' : '');
+      if (proj.result) {
+        if (proj.result === team.n) cls += (isPicked ? ' mwon' : ' mloser');
+        else cls += (isPicked ? ' mlost' : ' mloser');
+      }
+      var badge = isPicked ? '<span class="mbadge-c '+(proj.result?(proj.result===team.n?'mb-w':'mb-l'):'mb-p')+'">'+(proj.result?(proj.result===team.n?'✓':'✗'):'★')+'</span>' : '';
+      var probVal = proj.result ? (proj.result===team.n?'100':'0') : (resolvedH&&resolvedA ? (slot==='h'?proj.hp:proj.ap) : '');
+      var clickable = !isUsedElsewhere;
+      var inner = (slot==='h')
+        ? (badge+'<span class="mflag-c">'+team.f+'</span><span class="mname-c">'+esc(team.n)+'</span>'+(probVal!==''?'<span class="mprob-c">'+probVal+'%</span>':''))
+        : ((probVal!==''?'<span class="mprob-c">'+probVal+'%</span>':'')+'<span class="mname-c">'+esc(team.n)+'</span><span class="mflag-c">'+team.f+'</span>'+badge);
+      return '<div class="'+cls+'" style="flex:1;justify-content:'+(align)+'" onclick="'+(clickable?'toggleKOPick('+ri+',\''+esc2(team.n)+'\')':'')+'">'+inner+'</div>';
+    } else {
+      // Unresolved -- show every possible team as small inline clickable chips.
+      var options = getPossibleTeamsForSlot(ri, mi, slot).filter(function(t){ return t.n !== 'TBD'; });
+      var chipsHtml = options.map(function(t) {
+        var isPicked = pick === t.n;
+        var isUsedElsewhere = used.has(t.n) && !isPicked;
+        var champPct = (TEAM_INFO[t.n] && TEAM_INFO[t.n].ch) || 0;
+        var bg = isPicked ? 'var(--blue)' : 'var(--card)';
+        var col = isPicked ? '#fff' : (isUsedElsewhere ? 'var(--hint)' : 'var(--text)');
+        var border = isPicked ? 'var(--blue)' : 'var(--border)';
+        return '<span onclick="'+(isUsedElsewhere?'':'toggleKOPick('+ri+',\''+esc2(t.n)+'\')')+'" style="display:inline-flex;align-items:center;gap:4px;background:'+bg+';color:'+col+';border:1px solid '+border+';border-radius:14px;padding:3px 9px;font-size:11px;font-weight:600;cursor:'+(isUsedElsewhere?'default':'pointer')+';opacity:'+(isUsedElsewhere?'.4':'1')+';margin:2px">'+t.f+' '+esc(t.n)+'<span style="opacity:.7;font-weight:400">&nbsp;'+champPct+'%</span></span>';
+      }).join('');
+      return '<div style="flex:1;padding:6px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;'+(slot==='a'?'justify-content:flex-end':'')+'"><span style="font-size:10px;color:var(--hint);margin-right:2px">choose:</span>'+chipsHtml+'</div>';
+    }
+  }
+
+  var opts='<option value="">Pending</option>';
+  if (resolvedH) opts += '<option value="'+esc2(proj.h.n)+'"'+(proj.result===proj.h.n?' selected':'')+'>'+esc(proj.h.f)+' '+esc(proj.h.n)+'</option>';
+  if (resolvedA) opts += '<option value="'+esc2(proj.a.n)+'"'+(proj.result===proj.a.n?' selected':'')+'>'+esc(proj.a.f)+' '+esc(proj.a.n)+'</option>';
+  var resultSelect = '<select class="mresult-c" onchange="setMatchResult('+ri+','+mi+',this.value)"'+((!resolvedH||!resolvedA)?' disabled':'')+'>'+opts+'</select>';
+
+  return '<div class="mc-row">' +
+    renderSide(resolvedH, proj.h, 'h', 'flex-start') +
+    resultSelect +
+    renderSide(resolvedA, proj.a, 'a', 'flex-end') +
+  '</div>';
 }
 
 function matchRow(m, mi, ri, hP, aP, used, pick) {
