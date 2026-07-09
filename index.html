@@ -878,6 +878,115 @@ function matchRow(m, mi, ri, hP, aP, used, pick) {
   '</div>';
 }
 
+// ── MONTE CARLO POOL SIMULATION ──
+// Simulates the remainder of the bracket many times to estimate:
+//  - probability each individual entry survives to the end (all its picks win)
+//  - probability AT LEAST ONE entry survives (the pool "cashes")
+// Correctly handles correlation: shared picks win/lose together, and two teams
+// in the same match can't both advance.
+function simulatePool(numSims) {
+  numSims = numSims || 20000;
+
+  // An entry "survives" if every team it picked wins every match that team plays
+  // in the round the entry used them (i.e. the picked team must win its match in
+  // that specific round). Already-eliminated entries never survive.
+  // We simulate each undecided match forward using its hp/ap, propagating winners.
+
+  // Pre-build a static view of the bracket: for each round, the list of matches with
+  // the two team slots and home win prob. We deep-copy per sim and fill winners.
+  // Because later-round matchups depend on earlier winners, we simulate round by round
+  // using BRACKET_FEED to carry winners forward.
+
+  var survivorCounts = new Array(entries.length).fill(0);
+  var atLeastOneCount = 0;
+  var allSurviveCount = 0;
+
+  // Precompute each entry's picks as {round: [teamNames]}
+  var entryPicks = entries.map(function(e) {
+    return (e.koPicks||[]).map(function(pick, ri) {
+      return ri === 0 ? (pick||[]).slice() : (pick ? [pick] : []);
+    });
+  });
+  var entryAlive = entries.map(function(e){ return e.alive; });
+
+  for (var s = 0; s < numSims; s++) {
+    // Build a mutable copy of match team slots + results for this sim
+    var simRounds = koRounds.map(function(rd) {
+      return rd.matches.map(function(m) {
+        return { h:m.h.n, a:m.a.n, hp:m.hp, result:m.result || null };
+      });
+    });
+
+    // Simulate round by round, resolving undecided matches and propagating winners
+    for (var ri = 0; ri < simRounds.length; ri++) {
+      for (var mi = 0; mi < simRounds[ri].length; mi++) {
+        var sm = simRounds[ri][mi];
+        var winner;
+        if (sm.result) {
+          winner = sm.result;
+        } else if (sm.h === 'TBD' || sm.a === 'TBD') {
+          continue; // can't resolve yet (shouldn't happen if propagation is correct)
+        } else {
+          winner = (Math.random() * 100 < sm.hp) ? sm.h : sm.a;
+          sm.result = winner;
+        }
+        // propagate winner into next round slot
+        var feed = BRACKET_FEED[ri + '-' + mi];
+        if (feed && winner) {
+          var nextM = simRounds[feed.ri][feed.mi];
+          if (feed.slot === 'h') nextM.h = winner; else nextM.a = winner;
+          // recompute hp for the next match from real odds if both known
+          if (nextM.h !== 'TBD' && nextM.a !== 'TBD') {
+            nextM.hp = getMatchupWinPct(nextM.h, nextM.a);
+          }
+        }
+      }
+    }
+
+    // Now evaluate each entry: did every picked team win its match in the round used?
+    var anySurvived = false;
+    var allSurvived = true;
+    for (var ei = 0; ei < entries.length; ei++) {
+      var survived = entryAlive[ei];
+      if (survived) {
+        outer:
+        for (var ri2 = 0; ri2 < entryPicks[ei].length; ri2++) {
+          var picks = entryPicks[ei][ri2];
+          for (var pi = 0; pi < picks.length; pi++) {
+            var team = picks[pi];
+            // find that team's match in round ri2 and check they won
+            var found = false, won = false;
+            for (var mi2 = 0; mi2 < simRounds[ri2].length; mi2++) {
+              var mm = simRounds[ri2][mi2];
+              if (mm.h === team || mm.a === team) {
+                found = true;
+                won = (mm.result === team);
+                break;
+              }
+            }
+            // If the picked team never reaches this round's match (already eliminated
+            // earlier, e.g. lost their Semifinal so isn't in the Final), that's a fail too —
+            // not just "found and lost". A pick only succeeds if the team is confirmed IN
+            // that round's match AND wins it.
+            if (!found || !won) { survived = false; break outer; }
+          }
+        }
+      }
+      if (survived) { survivorCounts[ei]++; anySurvived = true; }
+      else { allSurvived = false; }
+    }
+    if (anySurvived) atLeastOneCount++;
+    if (allSurvived && entries.length > 0) allSurviveCount++;
+  }
+
+  return {
+    numSims: numSims,
+    perEntry: survivorCounts.map(function(c){ return c / numSims; }),
+    atLeastOne: atLeastOneCount / numSims,
+    allSurvive: allSurviveCount / numSims,
+  };
+}
+
 function renderSummary() {
   if (entries.length===0) return '<div class="main-inner"><div class="welcome"><div class="welcome-icon">📊</div><div class="welcome-title">No entries yet</div><div class="welcome-sub">Add entries to see the summary table</div></div></div>';
   var cols = [{k:'ko0',l:'Rd of 32'},{k:'ko1',l:'Rd of 16'},{k:'ko2',l:'Quarters'},{k:'ko3',l:'Semis'},{k:'ko4',l:'Final'}];
@@ -897,6 +1006,44 @@ function renderSummary() {
     '<span style="display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:50%;background:var(--red);display:inline-block"></span> Wrong</span>' +
     '<span style="display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:50%;background:var(--blue);display:inline-block"></span> Pending</span>' +
     '</div></div>';
+
+  // ── POOL-LEVEL ODDS (Monte Carlo) ──
+  var activeCount = entries.filter(function(e){return e.alive;}).length;
+  if (entries.length > 0) {
+    var sim = simulatePool(20000);
+    var atLeastPct = Math.round(sim.atLeastOne * 1000) / 10;
+    var allPct = Math.round(sim.allSurvive * 1000) / 10;
+    var barColor = atLeastPct>=50 ? 'var(--green)' : atLeastPct>=20 ? 'var(--gold)' : 'var(--red)';
+    h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">';
+    // At least one survives
+    h += '<div style="flex:1;min-width:220px;background:var(--card);border:1px solid var(--border);border-radius:var(--rl);padding:16px 18px">' +
+      '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:6px">Pool cashes — at least 1 entry survives to the Final winner</div>' +
+      '<div style="font-family:Barlow Condensed,sans-serif;font-size:38px;font-weight:700;color:'+barColor+';line-height:1">'+atLeastPct+'%</div>' +
+      '<div style="height:6px;background:#f0ede7;border-radius:3px;overflow:hidden;margin-top:8px"><div style="height:100%;width:'+atLeastPct+'%;background:'+barColor+'"></div></div>' +
+      '<div style="font-size:11px;color:var(--hint);margin-top:6px">'+activeCount+' of '+entries.length+' entr'+(entries.length===1?'y':'ies')+' still active · '+sim.numSims.toLocaleString()+' simulations</div>' +
+      '</div>';
+    // All survive
+    h += '<div style="flex:1;min-width:220px;background:var(--card);border:1px solid var(--border);border-radius:var(--rl);padding:16px 18px">' +
+      '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:6px">All active entries survive to the end</div>' +
+      '<div style="font-family:Barlow Condensed,sans-serif;font-size:38px;font-weight:700;color:var(--muted);line-height:1">'+allPct+'%</div>' +
+      '<div style="height:6px;background:#f0ede7;border-radius:3px;overflow:hidden;margin-top:8px"><div style="height:100%;width:'+allPct+'%;background:var(--muted)"></div></div>' +
+      '<div style="font-size:11px;color:var(--hint);margin-top:6px">Every one of your picks in every entry hits</div>' +
+      '</div>';
+    h += '</div>';
+    // Per-entry simulated survival (may differ slightly from analytic % due to correlation)
+    h += '<div style="margin-bottom:20px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:8px">Each entry\'s chance to survive to the end</div>';
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+    entries.forEach(function(e, ei) {
+      var pct = Math.round(sim.perEntry[ei] * 1000) / 10;
+      var col = !e.alive ? 'var(--red)' : pct>=25 ? 'var(--green)' : pct>=10 ? 'var(--gold)' : 'var(--muted)';
+      h += '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:8px 12px;min-width:120px">' +
+        '<div style="font-size:12px;font-weight:600;margin-bottom:2px">'+esc(e.name)+'</div>' +
+        '<div style="font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:700;color:'+col+'">'+(e.alive?pct+'%':'Out')+'</div>' +
+        '</div>';
+    });
+    h += '</div></div>';
+  }
+
   h += '<div class="sum-wrap"><table class="sum-tbl"><thead><tr>' +
     '<th>Pool</th><th>Used</th><th>Survive%</th>';
   cols.forEach(function(c){ h+='<th>'+c.l+'</th>'; });
