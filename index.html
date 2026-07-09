@@ -317,11 +317,11 @@ const KO_DEF = [
     {h:{f:'🇦🇷',n:'Argentina'},a:{f:'🇨🇭',n:'Switzerland'},hp:78,ap:22,result:null,city:'Kansas City',date:'Jul 11'},
   ]},
   {name:'Semifinals',matches:[
-    {h:{f:'🇫🇷',n:'France'},a:{f:'🇪🇸',n:'Spain'},hp:52,ap:48,result:null,city:'Dallas',date:'Jul 14'},
-    {h:{f:'🏴󠁧󠁢󠁥󠁮󠁧󠁿',n:'England'},a:{f:'🇦🇷',n:'Argentina'},hp:44,ap:56,result:null,city:'Atlanta',date:'Jul 15'},
+    {h:{f:'❓',n:'TBD'},a:{f:'❓',n:'TBD'},hp:50,ap:50,result:null,city:'Dallas',date:'Jul 14'},
+    {h:{f:'❓',n:'TBD'},a:{f:'❓',n:'TBD'},hp:50,ap:50,result:null,city:'Atlanta',date:'Jul 15'},
   ]},
   {name:'Final',matches:[
-    {h:{f:'🇫🇷',n:'France'},a:{f:'🇦🇷',n:'Argentina'},hp:50,ap:50,result:null,city:'New York',date:'Jul 19'},
+    {h:{f:'❓',n:'TBD'},a:{f:'❓',n:'TBD'},hp:50,ap:50,result:null,city:'New York',date:'Jul 19'},
   ]},
 ];
 
@@ -397,7 +397,91 @@ const BRACKET_FEED = {
   '3-0':  {ri:4, mi:0, slot:'h'},  '3-1':  {ri:4, mi:0, slot:'a'},
 };
 
-// ── QUADRANT MAP ──
+// Reverse lookup: given a target [ri,mi,slot], find which earlier [ri,mi] match feeds it.
+const INVERSE_FEED = {};
+Object.keys(BRACKET_FEED).forEach(function(key) {
+  var feed = BRACKET_FEED[key];
+  var srcParts = key.split('-');
+  var srcRi = parseInt(srcParts[0]), srcMi = parseInt(srcParts[1]);
+  INVERSE_FEED[feed.ri+'-'+feed.mi+'-'+feed.slot] = { ri:srcRi, mi:srcMi };
+});
+
+// Since the Quarterfinal bracket is fully locked (8 real teams in 4 fixed matches),
+// the STRUCTURE of who could face whom in the SF and Final is entirely deterministic --
+// only the WINNERS are uncertain. So for any of the 8 remaining teams we can precompute
+// their fixed forward path: which SF match/slot they'd occupy if they win their QF, and
+// which Final slot they'd occupy if they also win that SF. This lets us project an
+// entry's own future-round picks forward without needing to independently resolve both
+// sides of every intermediate match first.
+function getTeamForwardPath(teamName) {
+  for (var mi = 0; mi < koRounds[2].matches.length; mi++) {
+    var m = koRounds[2].matches[mi];
+    if (m.h.n === teamName || m.a.n === teamName) {
+      var qfSlot = m.h.n === teamName ? 'h' : 'a';
+      var sfFeed = BRACKET_FEED['2-' + mi]; // where this QF match's winner goes
+      var finalFeed = sfFeed ? BRACKET_FEED[sfFeed.ri + '-' + sfFeed.mi] : null; // where that SF match's winner goes
+      return { qf:{ri:2,mi:mi,slot:qfSlot}, sf:sfFeed, final:finalFeed };
+    }
+  }
+  return null; // team not found among current QF participants (shouldn't happen for valid picks)
+}
+
+// Projects which team should appear in a given [ri,mi,slot] for a SPECIFIC entry's
+// own pick chain, when the official/shared bracket doesn't have a real result there yet.
+// This never mutates the shared koRounds data -- it's purely for personalizing what an
+// entry sees on their own future-round pages, e.g. showing "Spain" in the Final slot
+// once that entry has picked Spain to win the Semifinal, even though the real-world
+// Semifinal hasn't been played and the official Final match is still TBD for everyone else.
+function projectTeamForEntry(ri, mi, slot, entry) {
+  var m = koRounds[ri].matches[mi];
+  var direct = slot === 'h' ? m.h : m.a;
+  if (direct.n !== 'TBD') return direct; // official result already resolved this slot
+
+  // Walk the entry's own picks (QF, then SF) and see if any of them structurally
+  // lands in this exact [ri, mi, slot] via their fixed forward path.
+  var qfPick = (entry.koPicks||[])[2];
+  var sfPick = (entry.koPicks||[])[3];
+
+  if (qfPick) {
+    var qfPath = getTeamForwardPath(qfPick);
+    if (qfPath) {
+      if (ri === 3 && qfPath.sf && qfPath.sf.ri === ri && qfPath.sf.mi === mi && qfPath.sf.slot === slot) {
+        return { f:getTeamFlag(qfPick), n:qfPick };
+      }
+      if (ri === 4 && qfPath.final && qfPath.final.ri === ri && qfPath.final.mi === mi && qfPath.final.slot === slot) {
+        // Only valid if this entry ALSO picked the same team to win the SF (otherwise the
+        // QF pick alone doesn't guarantee they reach the Final).
+        if (sfPick === qfPick) return { f:getTeamFlag(qfPick), n:qfPick };
+      }
+    }
+  }
+  if (sfPick) {
+    var sfPath = getTeamForwardPath(sfPick);
+    if (sfPath && ri === 4 && sfPath.final && sfPath.final.ri === ri && sfPath.final.mi === mi && sfPath.final.slot === slot) {
+      return { f:getTeamFlag(sfPick), n:sfPick };
+    }
+  }
+
+  return { f:'❓', n:'TBD' };
+}
+
+// Builds a "projected" version of a match for a specific entry: real h/a where known,
+// otherwise filled in using that entry's own pick chain. Also recomputes hp/ap using
+// real head-to-head odds once both sides are known via projection.
+function getProjectedMatch(ri, mi, entry) {
+  var m = koRounds[ri].matches[mi];
+  if (m.result) return m; // already officially decided, nothing to project
+  var projH = m.h.n !== 'TBD' ? m.h : projectTeamForEntry(ri, mi, 'h', entry);
+  var projA = m.a.n !== 'TBD' ? m.a : projectTeamForEntry(ri, mi, 'a', entry);
+  var projHp = m.hp, projAp = m.ap;
+  if (projH.n !== 'TBD' && projA.n !== 'TBD' && (projH.n !== m.h.n || projA.n !== m.a.n)) {
+    projHp = getMatchupWinPct(projH.n, projA.n);
+    projAp = 100 - projHp;
+  }
+  return { h:projH, a:projA, hp:projHp, ap:projAp, result:m.result, city:m.city, date:m.date, projected:(projH.n!==m.h.n || projA.n!==m.a.n) };
+}
+
+// ── QUADRANT MAP ──// ── QUADRANT MAP ──
 const QUADRANTS = {
   Q1: ['Germany','Paraguay','France','Sweden','South Africa','Canada','Netherlands','Morocco'],
   Q2: ['Portugal','Croatia','Spain','Austria','United States','Bosnia','Belgium','Senegal'],
@@ -420,6 +504,7 @@ function getTeamFlag(name) {
 var entries = [];
 var selEntry = null;
 var stage = 'overview';
+var _simCache = null; // shared Monte Carlo result, recomputed once per render() pass
 var koRounds = JSON.parse(JSON.stringify(KO_DEF));
 
 // ── STORAGE ──
@@ -648,10 +733,27 @@ function setMatchResult(ri, mi, winner) {
 
 // ── RENDER ──
 function render() {
+  // Recompute the shared Monte Carlo simulation ONCE per render pass so every
+  // part of the UI (header stat, entry cards, summary table, summary panel)
+  // shows the exact same, correctly-compounded survival numbers.
+  _simCache = entries.length > 0 ? simulatePool(15000) : null;
   renderEpills();
   renderSbar();
   renderSnav();
   renderMain();
+}
+
+// Returns an entry's true survival probability (0-100), using the cached
+// Monte Carlo result which correctly requires every picked team to actually
+// reach and win the round it was picked for -- not just win a single isolated
+// match assuming it magically got there.
+function getSurvPct(e) {
+  if (!e.alive) return 0;
+  var idx = entries.indexOf(e);
+  if (_simCache && idx >= 0 && _simCache.perEntry[idx] !== undefined) {
+    return Math.round(_simCache.perEntry[idx] * 100);
+  }
+  return calcSurv(e); // fallback for safety if cache isn't ready
 }
 
 function renderEpills() {
@@ -671,7 +773,7 @@ function renderSbar() {
   if (selEntry === null || entries.length === 0) { el.style.display='none'; return; }
   el.className = 'sbar'; el.style.display = 'flex';
   var e = entries[selEntry];
-  var surv = calcSurv(e);
+  var surv = getSurvPct(e);
   var r32Count = (e.koPicks[0]||[]).length;
   var otherKpCount = (e.koPicks||[]).slice(1).filter(function(x){return x;}).length;
   var kp = r32Count + otherKpCount;
@@ -726,7 +828,7 @@ function renderOverview() {
   }
   h += '<div class="ov-grid">';
   entries.forEach(function(e, i) {
-    var surv = calcSurv(e);
+    var surv = getSurvPct(e);
     var koFlat = [];
     (e.koPicks||[]).forEach(function(n, ri) {
       if (ri === 0) { (n||[]).forEach(function(name){ koFlat.push({n:name,ri:ri}); }); }
@@ -820,7 +922,7 @@ function renderKOStage(ri) {
   var pick = (e.koPicks||[])[ri];
 
   if (ri===4) {
-    var m = rd.matches[0];
+    var m = getProjectedMatch(ri, 0, e);
     var hP=pick===m.h.n, aP=pick===m.a.n;
     var champ = m.result || pick;
     var ct = champ ? (m.h.n===champ?m.h:m.a) : null;
@@ -829,6 +931,9 @@ function renderKOStage(ri) {
       '<div class="champ-name">'+ct.f+' '+esc(ct.n)+'</div>' +
       '<div class="champ-sub">'+(m.result?'World Champion':'Your pick to win it all')+'</div></div>';
     h += '<div class="kh"><h2>The Final</h2></div>';
+    if (m.projected) {
+      h += '<div style="max-width:520px;margin:0 auto 10px;background:var(--gold-l);border:1px solid #f0d595;border-radius:var(--r);padding:6px 12px;font-size:11px;color:var(--gold);font-weight:600">🔮 Projected matchup — based on your own picks advancing, not yet officially decided</div>';
+    }
     h += '<div style="max-width:520px;margin:0 auto">' + otherEntriesPanel(ri, pick ? [pick] : []) + '</div>';
     h += '<div style="max-width:520px;margin:0 auto">'+matchRow(m,0,ri,hP,aP,used,pick)+'</div>';
     return h;
@@ -837,18 +942,26 @@ function renderKOStage(ri) {
   var h = '<div class="kh"><h2>'+rd.name+'</h2><span class="khint">Click a team to pick · each team usable once</span></div>';
   h += otherEntriesPanel(ri, pick ? [pick] : []);
   if (pick) h += '<div class="my-pick-bar">✓ Your pick this round: <strong>'+esc(pick)+'</strong> &nbsp;·&nbsp; <span style="color:var(--muted);font-weight:400">Click again to deselect</span></div>';
+  var anyProjected = false;
   h += '<div class="matches">';
-  rd.matches.forEach(function(m, mi) {
+  rd.matches.forEach(function(m0, mi) {
+    var m = getProjectedMatch(ri, mi, e);
+    if (m.projected) anyProjected = true;
     var hP=pick===m.h.n, aP=pick===m.a.n;
     h += matchRow(m,mi,ri,hP,aP,used,pick);
   });
   h += '</div>';
+  if (anyProjected) {
+    h += '<div style="margin-top:10px;font-size:11px;color:var(--gold);display:flex;align-items:center;gap:5px">🔮 Some matchups above are projected from your own picks advancing further — not yet officially decided in the real tournament</div>';
+  }
   return h;
 }
 
 function matchRow(m, mi, ri, hP, aP, used, pick) {
   var hUsed = used.has(m.h.n) && !hP;
   var aUsed = used.has(m.a.n) && !aP;
+  var hTbd = m.h.n === 'TBD';
+  var aTbd = m.a.n === 'TBD';
   var hCls='mtr-c', aCls='mtr-c';
   if (m.result) {
     if (m.result===m.h.n) { hCls+=(hP?' mwon':' mloser'); aCls+=(aP?' mlost':' mloser'); }
@@ -857,22 +970,24 @@ function matchRow(m, mi, ri, hP, aP, used, pick) {
     if (hP) hCls+=' mpick';
     if (aP) aCls+=' mpick';
   }
-  if (hUsed) hCls+=' mused';
-  if (aUsed) aCls+=' mused';
+  if (hUsed || hTbd) hCls+=' mused';
+  if (aUsed || aTbd) aCls+=' mused';
   var hBadge='', aBadge='';
   if (hP) hBadge='<span class="mbadge-c '+(m.result?(m.result===m.h.n?'mb-w':'mb-l'):'mb-p')+'">'+(m.result?(m.result===m.h.n?'✓':'✗'):'★')+'</span>';
   if (aP) aBadge='<span class="mbadge-c '+(m.result?(m.result===m.a.n?'mb-w':'mb-l'):'mb-p')+'">'+(m.result?(m.result===m.a.n?'✓':'✗'):'★')+'</span>';
-  var opts='<option value="">Pending</option>' +
-    '<option value="'+esc2(m.h.n)+'"'+(m.result===m.h.n?' selected':'')+'>'+esc(m.h.f)+' '+esc(m.h.n)+'</option>' +
-    '<option value="'+esc2(m.a.n)+'"'+(m.result===m.a.n?' selected':'')+'>'+esc(m.a.f)+' '+esc(m.a.n)+'</option>';
-  var hpDisplay = m.result ? (m.result===m.h.n ? '100' : '0') : m.hp;
-  var apDisplay = m.result ? (m.result===m.a.n ? '100' : '0') : m.ap;
+  var opts='<option value="">Pending</option>';
+  if (!hTbd) opts += '<option value="'+esc2(m.h.n)+'"'+(m.result===m.h.n?' selected':'')+'>'+esc(m.h.f)+' '+esc(m.h.n)+'</option>';
+  if (!aTbd) opts += '<option value="'+esc2(m.a.n)+'"'+(m.result===m.a.n?' selected':'')+'>'+esc(m.a.f)+' '+esc(m.a.n)+'</option>';
+  var hpDisplay = m.result ? (m.result===m.h.n ? '100' : '0') : (hTbd||aTbd ? '?' : m.hp);
+  var apDisplay = m.result ? (m.result===m.a.n ? '100' : '0') : (hTbd||aTbd ? '?' : m.ap);
+  var hClickable = !hUsed && !hTbd;
+  var aClickable = !aUsed && !aTbd;
   return '<div class="mc-row">' +
-    '<div class="'+hCls+'" onclick="'+(hUsed?'':'toggleKOPick('+ri+',\''+esc2(m.h.n)+'\')')+'">' +
+    '<div class="'+hCls+'" onclick="'+(hClickable?'toggleKOPick('+ri+',\''+esc2(m.h.n)+'\')':'')+'">' +
       hBadge+'<span class="mflag-c">'+m.h.f+'</span><span class="mname-c">'+esc(m.h.n)+'</span><span class="mprob-c">'+hpDisplay+'%</span>' +
     '</div>' +
-    '<select class="mresult-c" onchange="setMatchResult('+ri+','+mi+',this.value)">'+opts+'</select>' +
-    '<div class="'+aCls+'" onclick="'+(aUsed?'':'toggleKOPick('+ri+',\''+esc2(m.a.n)+'\')')+'">' +
+    '<select class="mresult-c" onchange="setMatchResult('+ri+','+mi+',this.value)"'+((hTbd||aTbd)?' disabled':'')+'>'+opts+'</select>' +
+    '<div class="'+aCls+'" onclick="'+(aClickable?'toggleKOPick('+ri+',\''+esc2(m.a.n)+'\')':'')+'">' +
       '<span class="mprob-c">'+apDisplay+'%</span><span class="mname-c">'+esc(m.a.n)+'</span><span class="mflag-c">'+m.a.f+'</span>'+aBadge +
     '</div>' +
   '</div>';
@@ -1010,7 +1125,7 @@ function renderSummary() {
   // ── POOL-LEVEL ODDS (Monte Carlo) ──
   var activeCount = entries.filter(function(e){return e.alive;}).length;
   if (entries.length > 0) {
-    var sim = simulatePool(20000);
+    var sim = _simCache || simulatePool(15000); // reuse the shared cache computed once in render()
     var atLeastPct = Math.round(sim.atLeastOne * 1000) / 10;
     var allPct = Math.round(sim.allSurvive * 1000) / 10;
     var barColor = atLeastPct>=50 ? 'var(--green)' : atLeastPct>=20 ? 'var(--gold)' : 'var(--red)';
@@ -1049,7 +1164,7 @@ function renderSummary() {
   cols.forEach(function(c){ h+='<th>'+c.l+'</th>'; });
   h += '</tr></thead><tbody>';
   entries.forEach(function(e, ei) {
-    var surv=calcSurv(e);
+    var surv=getSurvPct(e);
     var r32cnt=(e.koPicks[0]||[]).length;
     var otherKoCnt=(e.koPicks||[]).slice(1).filter(function(x){return x;}).length;
     var used=r32cnt+otherKoCnt;
