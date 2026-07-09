@@ -437,11 +437,22 @@ function projectTeamForEntry(ri, mi, slot, entry) {
   var direct = slot === 'h' ? m.h : m.a;
   if (direct.n !== 'TBD') return direct; // official result already resolved this slot
 
-  // Walk the entry's own picks (QF, then SF) and see if any of them structurally
-  // lands in this exact [ri, mi, slot] via their fixed forward path.
   var qfPick = (entry.koPicks||[])[2];
   var sfPick = (entry.koPicks||[])[3];
 
+  // A team's OWN pick for a round is, on its own, enough evidence to place them in
+  // their natural bracket slot for THAT round's own display -- the entry doesn't
+  // also need an earlier round's pick to "justify" it. E.g. picking Spain for the
+  // Semifinal should show Spain sitting in the SF match list immediately, even with
+  // no Quarterfinal pick on file.
+  if (ri === 3 && sfPick) {
+    var ownSfPath = getTeamForwardPath(sfPick);
+    if (ownSfPath && ownSfPath.sf && ownSfPath.sf.ri === ri && ownSfPath.sf.mi === mi && ownSfPath.sf.slot === slot) {
+      return { f:getTeamFlag(sfPick), n:sfPick };
+    }
+  }
+
+  // Project an earlier pick forward into a later round's slot.
   if (qfPick) {
     var qfPath = getTeamForwardPath(qfPick);
     if (qfPath) {
