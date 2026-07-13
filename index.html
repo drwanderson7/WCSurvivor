@@ -240,7 +240,7 @@ const KO_NAMES = ['Round of 32','Round of 16','Quarterfinals','Semifinals','Fina
 const TEAM_INFO = {
   'Germany': {f:'🇩🇪', qf:32, sf:19, fin:8, ch:4},
   'Paraguay': {f:'🇵🇾', qf:19.56, sf:8.21, fin:2.18, ch:0.8},
-  'France': {f:'🇫🇷', qf:100, sf:80.4, fin:45.4, ch:25.5},
+  'France': {f:'🇫🇷', qf:100, sf:100, fin:53.7, ch:28.6},
   'Sweden': {f:'🇸🇪', qf:7.66, sf:3.42, fin:1.11, ch:0.44},
   'South Africa': {f:'🇿🇦', qf:0.0, sf:0.0, fin:0.0, ch:0.0},
   'Canada': {f:'🇨🇦', qf:39.28, sf:9.64, fin:2.35, ch:0.92},
@@ -248,7 +248,7 @@ const TEAM_INFO = {
   'Morocco': {f:'🇲🇦', qf:100, sf:19.6, fin:5.8, ch:1.6},
   'Portugal': {f:'🇵🇹', qf:30.46, sf:19.96, fin:9.98, ch:5.49},
   'Croatia': {f:'🇭🇷', qf:9.71, sf:4.63, fin:1.9, ch:0.8},
-  'Spain': {f:'🇪🇸', qf:100, sf:79.2, fin:42.6, ch:23.3},
+  'Spain': {f:'🇪🇸', qf:100, sf:100, fin:46.3, ch:23.2},
   'Austria': {f:'🇦🇹', qf:5.53, sf:2.24, fin:0.83, ch:0.33},
   'United States': {f:'🇺🇸', qf:35.99, sf:11.79, fin:4.4, ch:1.67},
   'Bosnia': {f:'🇧🇦', qf:7.67, sf:1.43, fin:0.49, ch:0.31},
@@ -260,9 +260,9 @@ const TEAM_INFO = {
   'Norway': {f:'🇳🇴', qf:100, sf:37.4, fin:14.3, ch:5.3},
   'Mexico': {f:'🇲🇽', qf:24.37, sf:8.91, fin:3.27, ch:1.23},
   'Ecuador': {f:'🇪🇨', qf:12.18, sf:4.14, fin:1.29, ch:0.49},
-  'England': {f:'🏴󠁧󠁢󠁥󠁮󠁧󠁿', qf:100, sf:62.6, fin:31.2, ch:14.9},
+  'England': {f:'🏴󠁧󠁢󠁥󠁮󠁧󠁿', qf:100, sf:100, fin:42.1, ch:18.8},
   'D.R. Congo': {f:'🇨🇩', qf:5.2, sf:1.13, fin:0.43, ch:0.27},
-  'Argentina': {f:'🇦🇷', qf:100, sf:78.2, fin:47.3, ch:25.3},
+  'Argentina': {f:'🇦🇷', qf:100, sf:100, fin:57.9, ch:29.5},
   'Cape Verde': {f:'🇨🇻', qf:3.92, sf:1.23, fin:0.39, ch:0.27},
   'Australia': {f:'🇦🇺', qf:9.65, sf:3.64, fin:1.02, ch:0.36},
   'Egypt': {f:'🇪🇬', qf:12.63, sf:4.89, fin:1.33, ch:0.49},
@@ -336,21 +336,14 @@ const MATCHUP_ODDS = {
   'Spain|Belgium': 79,
   'England|Norway': 63,
   'Argentina|Switzerland': 78,
-  // Semifinals (most-likely meetings)
-  'France|Spain': 57,       // SB showed France 64 / Spain 49 -> midpoint ~57
-  'France|Belgium': 76,
-  'France|Morocco_SF': 999, // placeholder ignore
-  'Argentina|England': 56,
-  'Argentina|Norway': 68,
-  'Argentina|Switzerland_SF': 999,
-  'England|Switzerland': 71,
-  'England|Norway_SF': 999,
-  // Final (most-likely meetings)
-  'France|Argentina': 50,
-  'France|England': 56,
-  'Argentina|Spain': 51,
-  'Argentina|England': 56,
-  'Spain|Norway': 65,
+  // Semifinals -- actual real-world matchups (France v Spain, Argentina v England)
+  'Argentina|England': 58,
+  'France|Spain': 54,
+  // Final -- all 4 possible pairings, real conditional win % from Silver Bulletin
+  'Argentina|France': 50,
+  'Argentina|Spain': 53,
+  'France|England': 57,
+  'Spain|England': 54,
 };
 function getMatchupWinPct(teamA, teamB) {
   // Returns teamA's win % vs teamB using real odds if available, else TEAM_INFO champ-ratio.
