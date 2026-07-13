@@ -200,6 +200,7 @@ body{font-family:'Barlow',sans-serif;background:var(--bg);color:var(--text);min-
     <button class="hdr-btn" onclick="go('summary')">📊 Pool Summary</button>
     <button class="hdr-btn" onclick="go('quadrants')">🧭 Quadrants</button>
     <button class="hdr-btn" onclick="go('path')">🎯 Path Planner</button>
+    <button class="hdr-btn" onclick="go('combos')">🔀 All Combos</button>
     <button class="hdr-btn" onclick="go('matrix')">🗺 Path Matrix</button>
     <button class="hdr-btn" onclick="go('probs')">Edit Probabilities</button>
   </div>
@@ -311,10 +312,10 @@ const KO_DEF = [
     {h:{f:'🇨🇭',n:'Switzerland'},a:{f:'🇨🇴',n:'Colombia'},hp:52,ap:48,result:'Switzerland',city:'Vancouver',date:'Jul 7'},
   ]},
   {name:'Quarterfinals',matches:[
-    {h:{f:'🇫🇷',n:'France'},a:{f:'🇲🇦',n:'Morocco'},hp:80,ap:20,result:null,city:'Boston',date:'Jul 9'},
-    {h:{f:'🇪🇸',n:'Spain'},a:{f:'🇧🇪',n:'Belgium'},hp:79,ap:21,result:null,city:'Los Angeles',date:'Jul 10'},
-    {h:{f:'🇳🇴',n:'Norway'},a:{f:'🏴󠁧󠁢󠁥󠁮󠁧󠁿',n:'England'},hp:37,ap:63,result:null,city:'Miami',date:'Jul 11'},
-    {h:{f:'🇦🇷',n:'Argentina'},a:{f:'🇨🇭',n:'Switzerland'},hp:78,ap:22,result:null,city:'Kansas City',date:'Jul 11'},
+    {h:{f:'🇫🇷',n:'France'},a:{f:'🇲🇦',n:'Morocco'},hp:80,ap:20,result:'France',city:'Boston',date:'Jul 9'},
+    {h:{f:'🇪🇸',n:'Spain'},a:{f:'🇧🇪',n:'Belgium'},hp:79,ap:21,result:'Spain',city:'Los Angeles',date:'Jul 10'},
+    {h:{f:'🇳🇴',n:'Norway'},a:{f:'🏴󠁧󠁢󠁥󠁮󠁧󠁿',n:'England'},hp:37,ap:63,result:'England',city:'Miami',date:'Jul 11'},
+    {h:{f:'🇦🇷',n:'Argentina'},a:{f:'🇨🇭',n:'Switzerland'},hp:78,ap:22,result:'Argentina',city:'Kansas City',date:'Jul 11'},
   ]},
   {name:'Semifinals',matches:[
     {h:{f:'❓',n:'TBD'},a:{f:'❓',n:'TBD'},hp:50,ap:50,result:null,city:'Dallas',date:'Jul 14'},
@@ -835,6 +836,7 @@ function renderMain() {
     if (stage==='summary')    { el.innerHTML = renderSummary();    return; }
     if (stage==='quadrants')  { el.innerHTML = renderQuadrants();  return; }
     if (stage==='path')       { el.innerHTML = renderPathPlanner(); return; }
+    if (stage==='combos')     { el.innerHTML = renderCombos();       return; }
     if (stage==='matrix')     { el.innerHTML = renderMatrix();     return; }
     if (stage==='probs')      { el.innerHTML = renderProbs();      return; }
     if (selEntry===null) {
@@ -1409,6 +1411,177 @@ function renderSummary() {
   }
 
   h += '</div>'; // main-inner
+  return h;
+}
+
+// Checks if a team is still alive (hasn't lost a decided match anywhere in the bracket).
+function teamAliveInBracket(name) {
+  var eliminated = false;
+  koRounds.forEach(function(rd) {
+    rd.matches.forEach(function(m) {
+      if (m.result && (m.h.n===name||m.a.n===name) && m.result!==name) eliminated = true;
+    });
+  });
+  return !eliminated;
+}
+
+// Enumerates every valid remaining pick combination for an entry, reusing the exact
+// same bracket-aware logic (getProjectedMatch / getPossibleTeamsForSlot) that powers
+// the round pages themselves -- so a combo is only generated if it's actually reachable
+// given the real bracket structure and this entry's own already-used teams. Capped at
+// 2 remaining rounds ahead to keep the combinatorics manageable.
+function enumerateEntryCombos(entry) {
+  var remainingRounds = [];
+  for (var ri = 1; ri <= 4; ri++) {
+    var picked = !!(entry.koPicks||[])[ri];
+    if (picked) continue; // entry already has a personal pick locked in for this round
+    // A round only needs a NEW combo choice if it isn't already fully decided in the
+    // real world -- otherwise there's nothing left to enumerate for it (the outcome
+    // is known, and if the entry never made a pick there, that's simply a round they
+    // chose to skip, not an open decision point).
+    var allDecided = koRounds[ri].matches.every(function(m){ return !!m.result; });
+    if (allDecided) continue;
+    remainingRounds.push(ri);
+  }
+  if (remainingRounds.length === 0 || remainingRounds.length > 2) {
+    return { combos: [], capped: remainingRounds.length > 2, remainingRounds: remainingRounds };
+  }
+
+  var results = [];
+  function recurse(idx, hypoEntry, chain) {
+    if (idx >= remainingRounds.length) {
+      results.push(chain.slice());
+      return;
+    }
+    var ri = remainingRounds[idx];
+    var used = getUsed(hypoEntry);
+    var optionsSet = {};
+    koRounds[ri].matches.forEach(function(m, mi) {
+      ['h','a'].forEach(function(slot) {
+        var proj = getProjectedMatch(ri, mi, hypoEntry);
+        var team = slot==='h' ? proj.h : proj.a;
+        if (team.n === 'TBD') {
+          getPossibleTeamsForSlot(ri, mi, slot).forEach(function(t) {
+            if (t.n !== 'TBD') optionsSet[t.n] = true;
+          });
+        } else {
+          optionsSet[team.n] = true;
+        }
+      });
+    });
+    Object.keys(optionsSet).forEach(function(teamName) {
+      if (used.has(teamName)) return;
+      if (!teamAliveInBracket(teamName)) return;
+      var newEntry = JSON.parse(JSON.stringify(hypoEntry));
+      newEntry.koPicks[ri] = teamName;
+      recurse(idx+1, newEntry, chain.concat([{ri:ri, team:teamName}]));
+    });
+  }
+
+  recurse(0, JSON.parse(JSON.stringify(entry)), []);
+  return { combos: results, capped: false, remainingRounds: remainingRounds };
+}
+
+function renderCombos() {
+  if (entries.length === 0) {
+    return '<div class="main-inner"><div class="welcome"><div class="welcome-icon">🔀</div><div class="welcome-title">No entries yet</div><div class="welcome-sub">Add entries to see their remaining combinations</div></div></div>';
+  }
+
+  // Build one big batch of hypothetical entries (real alive entries x their valid combos)
+  // and simulate them ALL together in a single pass, so every percentage shown is
+  // computed consistently against the same random draws.
+  var batchEntries = [];
+  var batchMeta = []; // {realEntryIndex, comboIndex}
+  var perEntryData = [];
+
+  entries.forEach(function(e, ei) {
+    if (!e.alive) {
+      perEntryData.push({ entry:e, combos:[], capped:false, remainingRounds:[], eliminated:true });
+      return;
+    }
+    var result = enumerateEntryCombos(e);
+    var comboEntries = result.combos.map(function(chain) {
+      var hypo = JSON.parse(JSON.stringify(e));
+      chain.forEach(function(c){ hypo.koPicks[c.ri] = c.team; });
+      return hypo;
+    });
+    comboEntries.forEach(function(hypo, ci) {
+      batchMeta.push({ realEntryIndex:ei, comboIndex:ci });
+      batchEntries.push(hypo);
+    });
+    perEntryData.push({ entry:e, combos:result.combos, capped:result.capped, remainingRounds:result.remainingRounds, eliminated:false });
+  });
+
+  var survPcts = [];
+  if (batchEntries.length > 0) {
+    var savedEntries = entries;
+    entries = batchEntries;
+    var sim = simulatePool(Math.max(8000, Math.round(120000 / batchEntries.length)));
+    entries = savedEntries;
+    survPcts = sim.perEntry.map(function(p){ return p*100; });
+  }
+
+  // Attach survival % back onto each entry's combo list
+  var survIdx = 0;
+  perEntryData.forEach(function(pd) {
+    if (pd.eliminated) return;
+    pd.combos = pd.combos.map(function(chain) {
+      return { chain:chain, survPct: survPcts[survIdx++] };
+    });
+    pd.combos.sort(function(a,b){ return b.survPct - a.survPct; });
+  });
+
+  var h = '<div class="main-inner">';
+  h += '<h2 style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:700;margin-bottom:6px">All Remaining Combinations</h2>';
+  h += '<p style="font-size:13px;color:var(--muted);margin-bottom:18px">Every valid pick combination left for each entry, given teams already used and the real bracket structure. Odds are computed together in one shared simulation so they\'re directly comparable across entries.</p>';
+
+  perEntryData.forEach(function(pd) {
+    var e = pd.entry;
+    h += '<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--rl);overflow:hidden;margin-bottom:14px">';
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:'+(pd.eliminated?'#8a8a8a':'var(--green)')+';color:#fff">';
+    h += '<span style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:700">'+esc(e.name)+'</span>';
+    h += '<span style="font-size:11px;opacity:.85">'+(pd.eliminated?'Eliminated':(pd.remainingRounds.length===0?'All picks locked':pd.remainingRounds.map(function(ri){return KO_NAMES[ri];}).join(' + ')+' remaining'))+'</span>';
+    h += '</div>';
+
+    if (pd.eliminated) {
+      h += '<div style="padding:12px 16px;font-size:12px;color:var(--hint)">This entry has already been eliminated.</div>';
+    } else if (pd.remainingRounds.length === 0) {
+      h += '<div style="padding:12px 16px;font-size:12px;color:var(--hint)">All future-round picks are already locked in for this entry.</div>';
+    } else if (pd.capped) {
+      h += '<div style="padding:12px 16px;font-size:12px;color:var(--gold)">This entry has '+pd.remainingRounds.length+' rounds still unpicked -- too many combinations to list here. Use the 🎯 Path Planner to see eligible teams round by round instead.</div>';
+    } else if (pd.combos.length === 0) {
+      h += '<div style="padding:12px 16px;font-size:12px;color:var(--red)">No valid combinations remain for this entry -- every path forward has already been blocked by used or eliminated teams.</div>';
+    } else {
+      h += '<div style="padding:10px 16px">';
+      h += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+      h += '<thead><tr>';
+      pd.remainingRounds.forEach(function(ri) {
+        h += '<th style="text-align:left;padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--hint)">'+KO_NAMES[ri]+'</th>';
+      });
+      h += '<th style="text-align:right;padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--hint)">Survival</th>';
+      h += '</tr></thead><tbody>';
+      pd.combos.forEach(function(c, ci) {
+        var isBest = ci === 0;
+        h += '<tr style="'+(isBest?'background:var(--green-l)':'')+';cursor:pointer" onclick="selectEntry('+entries.indexOf(e)+');go(\''+KO_NAMES[pd.remainingRounds[0]]+'\')">';
+        c.chain.forEach(function(pick) {
+          var q = getQuadrant(pick.team);
+          var qColor = q ? QUAD_COLORS[q] : '#999';
+          h += '<td style="padding:5px 8px">' +
+            '<span style="display:inline-flex;align-items:center;gap:4px;background:'+qColor+'1A;border:1px solid '+qColor+';border-radius:12px;padding:2px 8px;font-size:12px;font-weight:600;color:'+qColor+'">' +
+            getTeamFlag(pick.team) + ' ' + esc(pick.team) +
+            '</span></td>';
+        });
+        var survCol = c.survPct>=15?'var(--green)':c.survPct>=8?'var(--gold)':'var(--red)';
+        h += '<td style="text-align:right;padding:5px 8px;font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:700;color:'+survCol+'">'+c.survPct.toFixed(2)+'%'+(isBest?' <span style="font-size:10px;background:var(--green);color:#fff;padding:1px 6px;border-radius:8px;font-weight:600">BEST</span>':'')+'</td>';
+        h += '</tr>';
+      });
+      h += '</tbody></table>';
+      h += '</div>';
+    }
+    h += '</div>';
+  });
+
+  h += '</div>';
   return h;
 }
 
