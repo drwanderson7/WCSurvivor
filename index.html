@@ -1696,7 +1696,7 @@ function renderScenarioGrid() {
         labelParts.push(m.result + ' > ' + loser);
       });
     });
-    h += '<tr><td style="font-size:12px;font-weight:500">'+esc(labelParts.join(' &nbsp;·&nbsp; '))+'</td>';
+    h += '<tr><td style="font-size:12px;font-weight:500">'+labelParts.map(esc).join(' &nbsp;&middot;&nbsp; ')+'</td>';
     entries.forEach(function(e, ei) {
       if (!e.alive) { h += '<td style="text-align:center;color:var(--hint)">—</td>'; return; }
       var combos = entryCombos[ei];
