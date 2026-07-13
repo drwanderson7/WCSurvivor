@@ -201,6 +201,7 @@ body{font-family:'Barlow',sans-serif;background:var(--bg);color:var(--text);min-
     <button class="hdr-btn" onclick="go('quadrants')">🧭 Quadrants</button>
     <button class="hdr-btn" onclick="go('path')">🎯 Path Planner</button>
     <button class="hdr-btn" onclick="go('combos')">🔀 All Combos</button>
+    <button class="hdr-btn" onclick="go('scenarios')">🧮 Scenario Grid</button>
     <button class="hdr-btn" onclick="go('matrix')">🗺 Path Matrix</button>
     <button class="hdr-btn" onclick="go('probs')">Edit Probabilities</button>
   </div>
@@ -909,6 +910,7 @@ function renderMain() {
     if (stage==='quadrants')  { el.innerHTML = renderQuadrants();  return; }
     if (stage==='path')       { el.innerHTML = renderPathPlanner(); return; }
     if (stage==='combos')     { el.innerHTML = renderCombos();       return; }
+    if (stage==='scenarios')  { el.innerHTML = renderScenarioGrid();  return; }
     if (stage==='matrix')     { el.innerHTML = renderMatrix();     return; }
     if (stage==='probs')      { el.innerHTML = renderProbs();      return; }
     if (selEntry===null) {
@@ -1552,6 +1554,170 @@ function enumerateEntryCombos(entry) {
 
   recurse(0, JSON.parse(JSON.stringify(entry)), []);
   return { combos: results, capped: false, remainingRounds: remainingRounds };
+}
+
+// Generates every fully concrete real-world outcome for the currently undecided
+// matches (branching each one into both possible winners, propagating forward via
+// BRACKET_FEED exactly like the Monte Carlo simulation does, just enumerated instead
+// of randomly sampled). Capped to avoid combinatorial explosion.
+function enumerateConcreteScenarios(maxScenarios) {
+  maxScenarios = maxScenarios || 32;
+  var baseSimRounds = koRounds.map(function(rd) {
+    return rd.matches.map(function(m) { return { h:m.h.n, a:m.a.n, result:m.result||null }; });
+  });
+  var scenarios = [baseSimRounds];
+
+  for (var ri = 0; ri < baseSimRounds.length; ri++) {
+    for (var mi = 0; mi < baseSimRounds[ri].length; mi++) {
+      var newScenarios = [];
+      scenarios.forEach(function(sc) {
+        var m = sc[ri][mi];
+        if (m.result || m.h === 'TBD' || m.a === 'TBD') { newScenarios.push(sc); return; }
+        [m.h, m.a].forEach(function(winner) {
+          var clone = JSON.parse(JSON.stringify(sc));
+          clone[ri][mi].result = winner;
+          var feed = BRACKET_FEED[ri + '-' + mi];
+          if (feed) {
+            var nextM = clone[feed.ri][feed.mi];
+            if (feed.slot === 'h') nextM.h = winner; else nextM.a = winner;
+          }
+          newScenarios.push(clone);
+        });
+      });
+      scenarios = newScenarios;
+      if (scenarios.length > maxScenarios) return scenarios; // bail early, caller checks length
+    }
+  }
+  return scenarios;
+}
+
+// Checks a specific pick chain (from enumerateEntryCombos) against one concrete scenario.
+function checkChainAgainstScenario(chain, simRounds) {
+  return chain.every(function(pick) {
+    var found = false, won = false;
+    simRounds[pick.ri].forEach(function(m) {
+      if (m.h === pick.team || m.a === pick.team) { found = true; won = (m.result === pick.team); }
+    });
+    return found && won;
+  });
+}
+
+// Determines whether an entry survives a given concrete scenario, assuming they play
+// optimally (adaptively) for any round they haven't locked a pick in for yet.
+function entrySurvivesScenario(entry, simRounds, precomputedCombos) {
+  if (!entry.alive) return false;
+
+  var r32ok = (entry.koPicks[0]||[]).every(function(team) {
+    var found=false, won=false;
+    simRounds[0].forEach(function(m){ if(m.h===team||m.a===team){found=true;won=(m.result===team);} });
+    return found && won;
+  });
+  if (!r32ok) return false;
+
+  for (var ri=1; ri<=4; ri++) {
+    var pick = (entry.koPicks||[])[ri];
+    if (!pick) continue;
+    var found=false, won=false;
+    simRounds[ri].forEach(function(m){ if(m.h===pick||m.a===pick){found=true;won=(m.result===pick);} });
+    if (!found || !won) return false;
+  }
+
+  var combos = precomputedCombos || enumerateEntryCombos(entry).combos;
+  if (combos.length === 0) {
+    // No open rounds left to check -- already validated above.
+    var enumResult = enumerateEntryCombos(entry);
+    return enumResult.remainingRounds.length === 0;
+  }
+  return combos.some(function(chain) { return checkChainAgainstScenario(chain, simRounds); });
+}
+
+// Builds a short, readable label for a scenario, e.g. "Spain beats France, Argentina
+// beats England, Argentina wins Final".
+function describeScenario(simRounds) {
+  var parts = [];
+  simRounds.forEach(function(rd, ri) {
+    rd.forEach(function(m) {
+      if (!m.result) return;
+      var loser = m.result === m.h ? m.a : m.h;
+      if (loser === 'TBD') return;
+      parts.push({ ri:ri, text: m.result + ' beats ' + loser });
+    });
+  });
+  return parts;
+}
+
+function renderScenarioGrid() {
+  if (entries.length === 0) {
+    return '<div class="main-inner"><div class="welcome"><div class="welcome-icon">🧮</div><div class="welcome-title">No entries yet</div><div class="welcome-sub">Add entries to see the scenario grid</div></div></div>';
+  }
+
+  var scenarios = enumerateConcreteScenarios(32);
+  var h = '<div class="main-inner">';
+  h += '<h2 style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:700;margin-bottom:6px">Scenario Grid</h2>';
+
+  if (scenarios.length > 32) {
+    h += '<p style="font-size:13px;color:var(--gold)">Too many remaining possible outcomes to list individually (there are more undecided matches than this view can handle cleanly). Use 🔀 All Combos or 🎯 Path Planner instead.</p></div>';
+    return h;
+  }
+
+  h += '<p style="font-size:13px;color:var(--muted);margin-bottom:18px">Every real, concrete way the rest of the tournament could go, based on currently undecided matches. Each row is one full possible outcome -- ✓ means this entry survives in that exact outcome (assuming it picks optimally for anything not locked in yet), ✗ means it doesn\'t.</p>';
+
+  // Precompute each alive entry's valid combos once (used by every scenario check)
+  var entryCombos = entries.map(function(e) {
+    if (!e.alive) return [];
+    var r = enumerateEntryCombos(e);
+    return r.capped ? null : r.combos; // null = too complex to check precisely
+  });
+
+  h += '<div class="sum-wrap"><table class="sum-tbl"><thead><tr>';
+  h += '<th>Outcome</th>';
+  entries.forEach(function(e) {
+    h += '<th style="text-align:center">'+esc(e.name)+'</th>';
+  });
+  h += '</tr></thead><tbody>';
+
+  var survivedCount = new Array(entries.length).fill(0);
+
+  scenarios.forEach(function(simRounds) {
+    var desc = describeScenario(simRounds);
+    // Only show the parts of the description relevant to CURRENTLY undecided rounds
+    // (skip already-known historical results to keep rows readable)
+    var relevantParts = desc.filter(function(p) {
+      return !koRounds[p.ri].matches.every(function(m){ return !!m.result; }) || false;
+    });
+    // Simpler: show results for rounds that were undecided in the ORIGINAL koRounds
+    var labelParts = [];
+    simRounds.forEach(function(rd, ri) {
+      rd.forEach(function(m, mi) {
+        var orig = koRounds[ri].matches[mi];
+        if (orig.result) return; // was already decided before this scenario branch, skip in label
+        if (!m.result) return;
+        var loser = m.result === m.h ? m.a : m.h;
+        labelParts.push(m.result + ' > ' + loser);
+      });
+    });
+    h += '<tr><td style="font-size:12px;font-weight:500">'+esc(labelParts.join(' &nbsp;·&nbsp; '))+'</td>';
+    entries.forEach(function(e, ei) {
+      if (!e.alive) { h += '<td style="text-align:center;color:var(--hint)">—</td>'; return; }
+      var combos = entryCombos[ei];
+      if (combos === null) { h += '<td style="text-align:center;color:var(--hint)" title="Too many open rounds to check precisely">?</td>'; return; }
+      var survives = entrySurvivesScenario(e, simRounds, combos);
+      if (survives) survivedCount[ei]++;
+      h += '<td style="text-align:center;font-size:16px;color:'+(survives?'var(--green)':'var(--red)')+'">'+(survives?'✓':'✗')+'</td>';
+    });
+    h += '</tr>';
+  });
+
+  h += '</tbody><tfoot><tr style="border-top:2px solid var(--border)">';
+  h += '<td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);padding-top:8px">Survives in (raw count, not weighted by real-world likelihood)</td>';
+  entries.forEach(function(e, ei) {
+    h += '<td style="text-align:center;font-weight:700;font-family:Barlow Condensed,sans-serif;font-size:15px;padding-top:8px">'+(e.alive ? survivedCount[ei]+' / '+scenarios.length : '—')+'</td>';
+  });
+  h += '</tr></tfoot>';
+  h += '</table></div>';
+
+  h += '</div>';
+  return h;
 }
 
 function renderCombos() {
