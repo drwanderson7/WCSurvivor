@@ -1521,12 +1521,32 @@ function renderCombos() {
     pd.combos = pd.combos.map(function(chain) {
       return { chain:chain, survPct: survPcts[survIdx++] };
     });
-    pd.combos.sort(function(a,b){ return b.survPct - a.survPct; });
+
+    // Group combos by everything EXCEPT their final pick. When multiple combos share
+    // the same earlier picks and only differ in the LAST round, that final choice
+    // doesn't need to be locked in now -- the entry can simply wait and pick whichever
+    // team actually shows up once the earlier rounds resolve. In that case the true
+    // achievable probability is the SUM across those branches (mutually exclusive,
+    // exactly one will actually happen), not any single pre-committed guess.
+    var groups = {};
+    pd.combos.forEach(function(c) {
+      var prefix = c.chain.slice(0, -1);
+      var key = JSON.stringify(prefix.map(function(p){return p.team;}));
+      if (!groups[key]) groups[key] = { prefix:prefix, options:[] };
+      groups[key].options.push({ team: c.chain[c.chain.length-1].team, ri: c.chain[c.chain.length-1].ri, survPct: c.survPct });
+    });
+
+    pd.groupedCombos = Object.keys(groups).map(function(key) {
+      var g = groups[key];
+      var totalPct = g.options.reduce(function(sum,o){ return sum + o.survPct; }, 0);
+      return { prefix:g.prefix, options:g.options, totalPct:totalPct, adaptive: g.options.length > 1 };
+    });
+    pd.groupedCombos.sort(function(a,b){ return b.totalPct - a.totalPct; });
   });
 
   var h = '<div class="main-inner">';
   h += '<h2 style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:700;margin-bottom:6px">All Remaining Combinations</h2>';
-  h += '<p style="font-size:13px;color:var(--muted);margin-bottom:18px">Every valid pick combination left for each entry, given teams already used and the real bracket structure. Odds are computed together in one shared simulation so they\'re directly comparable across entries.</p>';
+  h += '<p style="font-size:13px;color:var(--muted);margin-bottom:18px">Every valid pick combination left for each entry, given teams already used and the real bracket structure. Odds are computed together in one shared simulation so they\'re directly comparable across entries. When a later round has more than one live option stemming from the same earlier pick, you don\'t need to guess now -- the percentage shown already assumes you\'ll correctly pick whichever team actually advances once that round is decided.</p>';
 
   perEntryData.forEach(function(pd) {
     var e = pd.entry;
@@ -1548,24 +1568,46 @@ function renderCombos() {
       h += '<div style="padding:10px 16px">';
       h += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
       h += '<thead><tr>';
-      pd.remainingRounds.forEach(function(ri) {
-        h += '<th style="text-align:left;padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--hint)">'+KO_NAMES[ri]+'</th>';
-      });
+      h += '<th style="text-align:left;padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--hint)">Pick now</th>';
+      h += '<th style="text-align:left;padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--hint)">Decide later</th>';
       h += '<th style="text-align:right;padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--hint)">Survival</th>';
       h += '</tr></thead><tbody>';
-      pd.combos.forEach(function(c, ci) {
-        var isBest = ci === 0;
-        h += '<tr style="'+(isBest?'background:var(--green-l)':'')+';cursor:pointer" onclick="selectEntry('+entries.indexOf(e)+');go(\''+KO_NAMES[pd.remainingRounds[0]]+'\')">';
-        c.chain.forEach(function(pick) {
-          var q = getQuadrant(pick.team);
+      pd.groupedCombos.forEach(function(g, gi) {
+        var isBest = gi === 0;
+        h += '<tr style="'+(isBest?'background:var(--green-l)':'')+';cursor:pointer" onclick="selectEntry('+entries.indexOf(e)+');go(\''+(g.prefix.length?KO_NAMES[g.prefix[0].ri]:KO_NAMES[g.options[0].ri])+'\')">';
+        // "Pick now" column -- the earlier rounds this entry needs to decide immediately
+        h += '<td style="padding:5px 8px">';
+        if (g.prefix.length === 0) {
+          h += '<span style="font-size:11px;color:var(--hint);font-style:italic">nothing yet</span>';
+        } else {
+          g.prefix.forEach(function(pick) {
+            var q = getQuadrant(pick.team);
+            var qColor = q ? QUAD_COLORS[q] : '#999';
+            h += '<span style="display:inline-flex;align-items:center;gap:4px;background:'+qColor+'1A;border:1px solid '+qColor+';border-radius:12px;padding:2px 8px;font-size:12px;font-weight:600;color:'+qColor+';margin-right:4px">' +
+              getTeamFlag(pick.team) + ' ' + esc(pick.team) + '</span>';
+          });
+        }
+        h += '</td>';
+        // "Decide later" column -- the final undecided pick, shown as options if adaptive
+        h += '<td style="padding:5px 8px">';
+        if (g.adaptive) {
+          h += '<span style="font-size:11px;color:var(--muted)">whichever wins: </span>';
+          g.options.forEach(function(o, oi) {
+            var q = getQuadrant(o.team);
+            var qColor = q ? QUAD_COLORS[q] : '#999';
+            h += '<span style="display:inline-flex;align-items:center;gap:3px;background:'+qColor+'1A;border:1px dashed '+qColor+';border-radius:12px;padding:2px 7px;font-size:11px;font-weight:600;color:'+qColor+';margin-right:3px">' +
+              getTeamFlag(o.team) + ' ' + esc(o.team) + '</span>';
+          });
+        } else {
+          var o = g.options[0];
+          var q = getQuadrant(o.team);
           var qColor = q ? QUAD_COLORS[q] : '#999';
-          h += '<td style="padding:5px 8px">' +
-            '<span style="display:inline-flex;align-items:center;gap:4px;background:'+qColor+'1A;border:1px solid '+qColor+';border-radius:12px;padding:2px 8px;font-size:12px;font-weight:600;color:'+qColor+'">' +
-            getTeamFlag(pick.team) + ' ' + esc(pick.team) +
-            '</span></td>';
-        });
-        var survCol = c.survPct>=15?'var(--green)':c.survPct>=8?'var(--gold)':'var(--red)';
-        h += '<td style="text-align:right;padding:5px 8px;font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:700;color:'+survCol+'">'+c.survPct.toFixed(2)+'%'+(isBest?' <span style="font-size:10px;background:var(--green);color:#fff;padding:1px 6px;border-radius:8px;font-weight:600">BEST</span>':'')+'</td>';
+          h += '<span style="display:inline-flex;align-items:center;gap:4px;background:'+qColor+'1A;border:1px solid '+qColor+';border-radius:12px;padding:2px 8px;font-size:12px;font-weight:600;color:'+qColor+'">' +
+            getTeamFlag(o.team) + ' ' + esc(o.team) + '</span>';
+        }
+        h += '</td>';
+        var survCol = g.totalPct>=15?'var(--green)':g.totalPct>=8?'var(--gold)':'var(--red)';
+        h += '<td style="text-align:right;padding:5px 8px;font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:700;color:'+survCol+'">'+g.totalPct.toFixed(2)+'%'+(isBest?' <span style="font-size:10px;background:var(--green);color:#fff;padding:1px 6px;border-radius:8px;font-weight:600">BEST</span>':'')+'</td>';
         h += '</tr>';
       });
       h += '</tbody></table>';
