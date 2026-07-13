@@ -760,19 +760,98 @@ function render() {
   // part of the UI (header stat, entry cards, summary table, summary panel)
   // shows the exact same, correctly-compounded survival numbers.
   _simCache = entries.length > 0 ? simulatePool(15000) : null;
+  // Also recompute the "true" adaptive-aware survival % for every entry -- this
+  // assumes OPTIMAL play at any remaining un-picked round (rather than silently
+  // ignoring rounds nobody has picked yet, which used to show a misleading 100%).
+  _trueSurvCache = entries.length > 0 ? computeTrueSurvivalForAllEntries() : null;
   renderEpills();
   renderSbar();
   renderSnav();
   renderMain();
 }
 
-// Returns an entry's true survival probability (0-100), using the cached
-// Monte Carlo result which correctly requires every picked team to actually
-// reach and win the round it was picked for -- not just win a single isolated
-// match assuming it magically got there.
+var _trueSurvCache = null; // {entryName: pct} -- best achievable survival assuming optimal future picks
+
+// Computes, for every entry, the survival probability assuming they play OPTIMALLY
+// at any round they haven't picked yet -- i.e. picking whichever available team gives
+// them the best combined chance, and adaptively choosing correctly among any later
+// options that only resolve themselves once an earlier round concludes. This replaces
+// the naive approach of just skipping unpicked rounds entirely (which silently treated
+// "haven't decided yet" as "nothing more required" and showed inflated survival %).
+function computeTrueSurvivalForAllEntries() {
+  var result = {};
+  var batchEntries = [];
+  var batchMeta = []; // {realIndex}
+
+  entries.forEach(function(e, ei) {
+    if (!e.alive) { result[ei] = 0; return; }
+    var enumResult = enumerateEntryCombos(e);
+    if (enumResult.remainingRounds.length === 0) {
+      // Fully committed (or nothing left to decide) -- use the entry's own direct
+      // simulated result, which already correctly requires their exact picks to hit.
+      result[ei] = { mode:'direct' };
+    } else if (enumResult.capped) {
+      // Too many rounds open to enumerate precisely -- fall back to the raw
+      // simulated number as a conservative approximation.
+      result[ei] = { mode:'fallback' };
+    } else if (enumResult.combos.length === 0) {
+      result[ei] = { mode:'zero' };
+    } else {
+      var comboEntries = enumResult.combos.map(function(chain) {
+        var hypo = JSON.parse(JSON.stringify(e));
+        chain.forEach(function(c){ hypo.koPicks[c.ri] = c.team; });
+        return hypo;
+      });
+      var startIdx = batchEntries.length;
+      comboEntries.forEach(function(hypo){ batchEntries.push(hypo); });
+      result[ei] = { mode:'grouped', chains:enumResult.combos, startIdx:startIdx, count:comboEntries.length };
+    }
+  });
+
+  var groupedSurvPcts = [];
+  if (batchEntries.length > 0) {
+    var savedEntries = entries;
+    entries = batchEntries;
+    var sim = simulatePool(Math.max(6000, Math.round(90000 / batchEntries.length)));
+    entries = savedEntries;
+    groupedSurvPcts = sim.perEntry.map(function(p){ return p*100; });
+  }
+
+  var finalResult = {};
+  entries.forEach(function(e, ei) {
+    var r = result[ei];
+    if (r === 0) { finalResult[ei] = 0; return; }
+    if (r.mode === 'direct' || r.mode === 'fallback') {
+      finalResult[ei] = _simCache && _simCache.perEntry[ei] !== undefined ? _simCache.perEntry[ei]*100 : 0;
+      return;
+    }
+    if (r.mode === 'zero') { finalResult[ei] = 0; return; }
+    // grouped: sum survival across the BEST "pick now" branch's downstream adaptive options
+    var chains = r.chains.map(function(chain, ci) {
+      return { chain:chain, survPct: groupedSurvPcts[r.startIdx+ci] };
+    });
+    var groups = {};
+    chains.forEach(function(c) {
+      var prefix = c.chain.slice(0,-1);
+      var key = JSON.stringify(prefix.map(function(p){return p.team;}));
+      if (!groups[key]) groups[key] = 0;
+      groups[key] += c.survPct;
+    });
+    var best = 0;
+    Object.keys(groups).forEach(function(k){ if (groups[k] > best) best = groups[k]; });
+    finalResult[ei] = best;
+  });
+  return finalResult;
+}
+
+// Returns an entry's true survival probability (0-100), assuming optimal play for
+// any remaining un-picked rounds (not just the specific picks made so far).
 function getSurvPct(e) {
   if (!e.alive) return 0;
   var idx = entries.indexOf(e);
+  if (_trueSurvCache && _trueSurvCache[idx] !== undefined) {
+    return Math.round(_trueSurvCache[idx]);
+  }
   if (_simCache && idx >= 0 && _simCache.perEntry[idx] !== undefined) {
     return Math.round(_simCache.perEntry[idx] * 100);
   }
